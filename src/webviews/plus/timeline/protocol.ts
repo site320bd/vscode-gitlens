@@ -12,13 +12,14 @@ export interface State extends WebviewState {
 	uri?: string;
 	uriType?: 'folder' | 'file';
 
+	abbreviatedShaLength: number;
 	dateFormat: string;
 	shortDateFormat: string;
 	access: FeatureAccess;
 }
 
 export interface Commit {
-	commit: string;
+	sha: string;
 	author: string;
 	date: string;
 	message: string;
@@ -33,13 +34,11 @@ export type Period = `${number}|${'D' | 'M' | 'Y'}` | 'all';
 
 // COMMANDS
 
-export interface OpenDataPointParams {
-	data?: {
-		id: string;
-		selected: boolean;
-	};
+export interface SelectDataPointParams {
+	id: string | undefined;
+	shift: boolean;
 }
-export const OpenDataPointCommand = new IpcCommand<OpenDataPointParams>(scope, 'point/open');
+export const SelectDataPointCommand = new IpcCommand<SelectDataPointParams>(scope, 'point/open');
 
 export interface UpdatePeriodParams {
 	period: Period;

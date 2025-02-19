@@ -1,13 +1,15 @@
 import './timeline.scss';
-import type { PropertyValues } from 'lit';
 import { html, LitElement, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
+import { setAbbreviatedShaLength, shortenRevision } from '../../../../git/utils/revision.utils';
 import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
+import type { Deferrable } from '../../../../system/function';
+import { debounce } from '../../../../system/function';
 import type { Period, State } from '../../../plus/timeline/protocol';
-import { OpenDataPointCommand, UpdatePeriodCommand } from '../../../plus/timeline/protocol';
+import { SelectDataPointCommand, UpdatePeriodCommand } from '../../../plus/timeline/protocol';
 import { GlApp } from '../../shared/app';
 import type { HostIpc } from '../../shared/ipc';
-import type { DataPointClickEventDetail, GlTimelineChart } from './components/chart';
+import type { CommitEventDetail, GlTimelineChart } from './components/chart';
 import { TimelineStateProvider } from './stateProvider';
 import { timelineBaseStyles, timelineStyles } from './timeline.css';
 import './components/chart';
@@ -38,13 +40,7 @@ export class GlTimelineApp extends GlApp<State> {
 	override connectedCallback(): void {
 		super.connectedCallback();
 
-		document.addEventListener('keydown', this.onDocumentKeyDown);
-	}
-
-	override disconnectedCallback(): void {
-		document.removeEventListener('keydown', this.onDocumentKeyDown);
-
-		super.disconnectedCallback();
+		setAbbreviatedShaLength(this.state.abbreviatedShaLength);
 	}
 
 	get allowed(): boolean | 'mixed' {
@@ -68,10 +64,7 @@ export class GlTimelineApp extends GlApp<State> {
 	}
 
 	@state()
-	private _loading = true;
-	get loading(): boolean {
-		return this.state.dataset != null && this.uri != null && this._loading;
-	}
+	private _loading = false;
 
 	get period(): Period {
 		return this.state.period;
@@ -82,7 +75,7 @@ export class GlTimelineApp extends GlApp<State> {
 	}
 
 	get sha(): string | undefined {
-		return this.state.sha;
+		return shortenRevision(this.state.sha);
 	}
 
 	get uri(): string | undefined {
@@ -91,20 +84,6 @@ export class GlTimelineApp extends GlApp<State> {
 
 	get uriType(): State['uriType'] {
 		return this.state.uriType;
-	}
-
-	@state()
-	private _zoomed = false;
-	get zoomed(): boolean {
-		return this._zoomed;
-	}
-
-	protected override willUpdate(changedProperties: PropertyValues): void {
-		if (!changedProperties.has('_loading') && !changedProperties.has('_zoomed')) {
-			this._loading = Boolean(this.state.dataset && this.uri);
-		}
-
-		super.willUpdate(changedProperties);
 	}
 
 	override render(): unknown {
@@ -116,7 +95,7 @@ export class GlTimelineApp extends GlApp<State> {
 				  ></gl-feature-gate>`
 				: nothing}
 			<div class="container">
-				<progress-indicator ?active=${this.loading}></progress-indicator>
+				<progress-indicator ?active=${this._loading}></progress-indicator>
 				<header class="header" ?hidden=${!this.uri}>
 					<span class="details">
 						<span class="details__title"
@@ -132,25 +111,6 @@ export class GlTimelineApp extends GlApp<State> {
 						</span>
 					</span>
 					<span class="toolbox">
-						${this.zoomed
-							? html`<gl-button
-									appearance="toolbar"
-									@click=${(e: MouseEvent) =>
-										e.shiftKey || e.altKey ? this._chart?.reset() : this._chart?.zoom(-1)}
-									aria-label="Zoom Out"
-							  >
-									<code-icon icon="zoom-out"></code-icon>
-									<span slot="tooltip">Zoom Out<br />[Alt] Reset Zoom</span>
-							  </gl-button>`
-							: nothing}
-						<gl-button
-							appearance="toolbar"
-							@click=${() => this._chart?.zoom(0.5)}
-							tooltip="Zoom In"
-							aria-label="Zoom In"
-						>
-							<code-icon icon="zoom-in"></code-icon>
-						</gl-button>
 						<span class="select-container">
 							<label for="periods">Timeframe</label>
 							<select
@@ -209,22 +169,20 @@ export class GlTimelineApp extends GlApp<State> {
 			dateFormat="${this.state.dateFormat}"
 			shortDateFormat="${this.state.shortDateFormat}"
 			.dataPromise=${this.state.dataset}
-			@gl-data-point-click=${this.onChartDataPointClicked}
-			@gl-load=${() => (this._loading = false)}
-			@gl-zoomed=${(e: CustomEvent<boolean>) => (this._zoomed = e.detail)}
+			@gl-commit-select=${this.onChartCommitSelected}
+			@gl-loading=${(e: CustomEvent<Promise<void>>) => {
+				this._loading = true;
+				void e.detail.finally(() => (this._loading = false));
+			}}
 		>
 		</gl-timeline-chart>`;
 	}
 
-	private onChartDataPointClicked(e: CustomEvent<DataPointClickEventDetail>) {
-		this._ipc.sendCommand(OpenDataPointCommand, e.detail);
-	}
+	private onChartCommitSelected(e: CustomEvent<CommitEventDetail>) {
+		if (e.detail.id == null) return;
 
-	private onDocumentKeyDown = (e: KeyboardEvent) => {
-		if (e.key === 'Escape' || e.key === 'Esc') {
-			this._chart?.reset();
-		}
-	};
+		this.fireSelectDataPoint(e.detail);
+	}
 
 	private onPeriodChanged(e: Event) {
 		const element = e.target as HTMLSelectElement;
@@ -234,6 +192,16 @@ export class GlTimelineApp extends GlApp<State> {
 		// this.log(`onPeriodChanged(): name=${element.name}, value=${value}`);
 
 		this._ipc.sendCommand(UpdatePeriodCommand, { period: value });
+	}
+
+	private _fireSelectDataPointDebounced: Deferrable<(e: CommitEventDetail) => void> | undefined;
+	private fireSelectDataPoint(e: CommitEventDetail) {
+		this._fireSelectDataPointDebounced ??= debounce(
+			(e: CommitEventDetail) => this._ipc.sendCommand(SelectDataPointCommand, e),
+			150,
+			250,
+		);
+		this._fireSelectDataPointDebounced(e);
 	}
 }
 

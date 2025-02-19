@@ -75,22 +75,23 @@ export const timelineStyles = css`
 		font-size: var(--font-size);
 		margin: 0;
 		padding: 0;
-		height: 100%;
-	}
-
-	.container {
-		display: grid;
-		grid-template-rows: min-content 1fr min-content;
-		min-height: 100%;
+		height: 100vh;
 		overflow: hidden;
 	}
 
+	.container {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+	}
+
 	.header {
+		flex: none;
 		display: grid;
 		grid-template-columns: 1fr min-content;
 		align-items: baseline;
 		grid-template-areas: 'details toolbox';
-		margin: 0.5rem 1rem 0.5rem 2rem;
+		margin: 0.5rem 1rem;
 	}
 
 	:host-context(body[data-placement='editor']) .header {
@@ -197,9 +198,8 @@ export const timelineStyles = css`
 	}
 
 	.timeline {
-		position: relative;
-		width: 100%;
-		height: 100%;
+		flex: 1;
+		min-height: 0;
 	}
 
 	.timeline__empty {
