@@ -11,7 +11,7 @@ import type { Subscription, SubscriptionAccount } from './plus/gk/models/subscri
 import type { Flatten } from './system/object';
 import type { WalkthroughContextKeys } from './telemetry/walkthroughStateProvider';
 import type { GraphColumnConfig } from './webviews/plus/graph/protocol';
-import type { Period } from './webviews/plus/timeline/protocol';
+import type { TimelineItemType, TimelinePeriod } from './webviews/plus/timeline/protocol';
 
 export declare type AttributeValue =
 	| string
@@ -840,7 +840,8 @@ export interface SubscriptionEventDataWithPrevious
 		Partial<SubscriptionPreviousEventData> {}
 
 type TimelineContextEventData = WebviewTelemetryContext & {
-	'context.period': string | undefined;
+	'context.itemType': TimelineItemType | undefined;
+	'context.period': TimelinePeriod | undefined;
 };
 export type TimelineTelemetryContext = TimelineContextEventData;
 
@@ -850,8 +851,8 @@ export type TimelineShownTelemetryContext = TimelineShownEventData;
 type TimelineShownEvent = WebviewShownEventData & TimelineShownEventData;
 
 interface TimelinePeriodChangedEvent extends TimelineContextEventData {
-	'period.old': Period | undefined;
-	'period.new': Period;
+	'period.old': TimelinePeriod | undefined;
+	'period.new': TimelinePeriod;
 }
 
 interface UsageTrackEvent {

@@ -3,9 +3,9 @@ import { html, LitElement, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { setAbbreviatedShaLength, shortenRevision } from '../../../../git/utils/revision.utils';
 import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
-import type { Deferrable } from '../../../../system/function';
-import { debounce } from '../../../../system/function';
-import type { Period, State } from '../../../plus/timeline/protocol';
+import type { Deferrable } from '../../../../system/function/debounce';
+import { debounce } from '../../../../system/function/debounce';
+import type { State } from '../../../plus/timeline/protocol';
 import { SelectDataPointCommand, UpdatePeriodCommand } from '../../../plus/timeline/protocol';
 import { GlApp } from '../../shared/app';
 import type { HostIpc } from '../../shared/ipc';
@@ -48,7 +48,7 @@ export class GlTimelineApp extends GlApp<State> {
 	}
 
 	get header(): { title: string; description: string } {
-		let title = this.state.title;
+		let title = this.state.item.path;
 		let description;
 
 		if (title != null) {
@@ -63,10 +63,14 @@ export class GlTimelineApp extends GlApp<State> {
 		return { title: title ?? '', description: description ?? '' };
 	}
 
+	get itemType() {
+		return this.state.item.type;
+	}
+
 	@state()
 	private _loading = false;
 
-	get period(): Period {
+	get period(): State['period'] {
 		return this.state.period;
 	}
 
@@ -75,15 +79,11 @@ export class GlTimelineApp extends GlApp<State> {
 	}
 
 	get sha(): string | undefined {
-		return shortenRevision(this.state.sha);
+		return shortenRevision(this.state.item.sha);
 	}
 
 	get uri(): string | undefined {
 		return this.state.uri;
-	}
-
-	get uriType(): State['uriType'] {
-		return this.state.uriType;
 	}
 
 	override render(): unknown {
@@ -99,7 +99,7 @@ export class GlTimelineApp extends GlApp<State> {
 				<header class="header" ?hidden=${!this.uri}>
 					<span class="details">
 						<span class="details__title"
-							><code-icon icon="${this.uriType === 'folder' ? 'folder' : 'file'}"></code-icon
+							><code-icon icon="${this.itemType === 'folder' ? 'folder' : 'file'}"></code-icon
 							>&nbsp;&nbsp;${this.header.title}</span
 						>
 						<span class="details__description">${this.header.description}</span>
@@ -199,13 +199,13 @@ export class GlTimelineApp extends GlApp<State> {
 		this._fireSelectDataPointDebounced ??= debounce(
 			(e: CommitEventDetail) => this._ipc.sendCommand(SelectDataPointCommand, e),
 			150,
-			250,
+			{ maxWait: 250 },
 		);
 		this._fireSelectDataPointDebounced(e);
 	}
 }
 
-function assertPeriod(period: string): asserts period is Period {
+function assertPeriod(period: string): asserts period is State['period'] {
 	if (period === 'all') return;
 
 	const [value, unit] = period.split('|');

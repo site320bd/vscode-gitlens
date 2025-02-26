@@ -384,6 +384,16 @@ export const timelineChartStyles = css`
 		font-weight: 600;
 	}
 
+	.bb-tooltip .sha {
+		/* font-family: monospace; */
+		background: var(--vscode-textCodeBlock-background);
+		border-radius: 0.3rem;
+		padding: 0.1rem 0.4rem 0.2rem 0.4rem;
+		margin-right: 0.2rem;
+		/* font-size: var(--vscode-editor-font-size); */
+		font-family: var(--vscode-editor-font-family);
+	}
+
 	.bb-tooltip .additions {
 		color: var(--vscode-gitDecoration-addedResourceForeground);
 	}

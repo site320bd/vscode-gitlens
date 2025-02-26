@@ -5,7 +5,7 @@ import { customElement, property, query, state } from 'lit/decorators.js';
 import type { ChartInternal, ChartWithInternal } from '../../../../../@types/bb';
 import { shortenRevision } from '../../../../../git/utils/revision.utils';
 import { log } from '../../../../../system/decorators/log';
-import { debounce } from '../../../../../system/function';
+import { debounce } from '../../../../../system/function/debounce';
 import { defer } from '../../../../../system/promise';
 import { pluralize } from '../../../../../system/string';
 import type { Commit, State } from '../../../../plus/timeline/protocol';

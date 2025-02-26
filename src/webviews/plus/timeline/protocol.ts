@@ -6,11 +6,14 @@ export const scope: IpcScope = 'timeline';
 
 export interface State extends WebviewState {
 	dataset?: Promise<Commit[]>;
-	period: Period;
-	title?: string;
-	sha?: string;
+	period: TimelinePeriod;
+
 	uri?: string;
-	uriType?: 'folder' | 'file';
+	item: {
+		type: 'folder' | 'file';
+		path: string;
+		sha: string | undefined;
+	};
 
 	abbreviatedShaLength: number;
 	dateFormat: string;
@@ -24,13 +27,15 @@ export interface Commit {
 	date: string;
 	message: string;
 
+	files: number | undefined;
 	additions: number | undefined;
 	deletions: number | undefined;
 
 	sort: number;
 }
 
-export type Period = `${number}|${'D' | 'M' | 'Y'}` | 'all';
+export type TimelineItemType = 'file' | 'folder';
+export type TimelinePeriod = `${number}|${'D' | 'M' | 'Y'}` | 'all';
 
 // COMMANDS
 
@@ -41,7 +46,7 @@ export interface SelectDataPointParams {
 export const SelectDataPointCommand = new IpcCommand<SelectDataPointParams>(scope, 'point/open');
 
 export interface UpdatePeriodParams {
-	period: Period;
+	period: TimelinePeriod;
 }
 export const UpdatePeriodCommand = new IpcCommand<UpdatePeriodParams>(scope, 'period/update');
 

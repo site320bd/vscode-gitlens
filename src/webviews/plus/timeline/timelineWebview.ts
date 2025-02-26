@@ -5,44 +5,60 @@ import type { TimelineShownTelemetryContext, TimelineTelemetryContext } from '..
 import type { Container } from '../../../container';
 import type { FileSelectedEvent } from '../../../eventBus';
 import { PlusFeatures } from '../../../features';
-import { openChanges, openChangesWithWorking } from '../../../git/actions/commit';
+import {
+	openChanges,
+	openChangesWithWorking,
+	openCommitChanges,
+	openCommitChangesWithWorking,
+} from '../../../git/actions/commit';
 import type { RepositoriesChangeEvent } from '../../../git/gitProviderService';
 import { GitUri } from '../../../git/gitUri';
 import { ensureWorkingUri } from '../../../git/gitUri.utils';
-import type { RepositoryChangeEvent } from '../../../git/models/repository';
+import type { GitCommit } from '../../../git/models/commit';
+import type { GitFileChange } from '../../../git/models/fileChange';
+import type {
+	Repository,
+	RepositoryChangeEvent,
+	RepositoryFileSystemChangeEvent,
+} from '../../../git/models/repository';
 import { RepositoryChange, RepositoryChangeComparisonMode } from '../../../git/models/repository';
+import { getPseudoCommitsWithStats } from '../../../git/utils/-webview/statusFile.utils';
 import { getChangedFilesCount } from '../../../git/utils/commit.utils';
+import { isUncommitted, isUncommittedStaged, shortenRevision } from '../../../git/utils/revision.utils';
 import type { SubscriptionChangeEvent } from '../../../plus/gk/subscriptionService';
 import { executeCommand, registerCommand } from '../../../system/-webview/command';
 import { configuration } from '../../../system/-webview/configuration';
-import { isFolderUri } from '../../../system/-webview/path';
+import { getFolderGlobUri, isDescendant, isFolderGlobUri, isFolderUri } from '../../../system/-webview/path';
 import { getTabUri, openEditor } from '../../../system/-webview/vscode';
 import { createFromDateDelta } from '../../../system/date';
 import { debug } from '../../../system/decorators/log';
 import type { Deferrable } from '../../../system/function/debounce';
 import { debounce } from '../../../system/function/debounce';
-import { filter } from '../../../system/iterable';
+import { filter, map } from '../../../system/iterable';
 import { flatten } from '../../../system/object';
 import { getSettledValue } from '../../../system/promise';
+import { SubscriptionManager } from '../../../system/subscriptionManager';
 import { uriEquals } from '../../../system/uri';
 import { isViewFileOrFolderNode } from '../../../views/nodes/utils/-webview/node.utils';
 import type { IpcMessage } from '../../protocol';
 import type { WebviewHost, WebviewProvider, WebviewShowingArgs } from '../../webviewProvider';
 import type { WebviewShowOptions } from '../../webviewsController';
 import { isSerializedState } from '../../webviewsController';
-import type { Commit, Period, State } from './protocol';
+import type { Commit, State, TimelineItemType, TimelinePeriod } from './protocol';
 import { DidChangeNotification, SelectDataPointCommand, UpdatePeriodCommand } from './protocol';
 import type { TimelineWebviewShowingArgs } from './registration';
 
 interface Context {
 	uri: Uri | undefined;
-	period: Period | undefined;
+	itemType: TimelineItemType | undefined;
+	period: TimelinePeriod | undefined;
 	etagRepositories: number | undefined;
 	etagRepository: number | undefined;
+	etagRepositoryWip: number | undefined;
 	etagSubscription: number | undefined;
 }
 
-const defaultPeriod: Period = '3|M';
+const defaultPeriod: TimelinePeriod = '3|M';
 
 export class TimelineWebviewProvider implements WebviewProvider<State, State, TimelineWebviewShowingArgs> {
 	private _context: Context;
@@ -58,22 +74,22 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 	) {
 		this._context = {
 			uri: undefined,
+			itemType: undefined,
 			period: defaultPeriod,
 			etagRepositories: this.container.git.etag,
 			etagRepository: 0,
+			etagRepositoryWip: 0,
 			etagSubscription: this.container.subscription.etag,
 		};
 
 		if (this.host.isHost('editor')) {
 			this._disposable = Disposable.from(
 				this.container.subscription.onDidChange(this.onSubscriptionChanged, this),
-				this.container.git.onDidChangeRepository(this.onRepositoryChanged, this),
 			);
 		} else {
 			this.host.description = proBadge;
 			this._disposable = Disposable.from(
 				this.container.subscription.onDidChange(this.onSubscriptionChanged, this),
-				this.container.git.onDidChangeRepository(this.onRepositoryChanged, this),
 				this.container.git.onDidChangeRepositories(this.onRepositoriesChanged, this),
 				window.tabGroups.onDidChangeTabGroups(this.onTabsChanged, this),
 				window.tabGroups.onDidChangeTabs(this.onTabsChanged, this),
@@ -116,6 +132,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 	getTelemetryContext(): TimelineTelemetryContext {
 		return {
 			...this.host.getTelemetryContext(),
+			'context.itemType': this._context.itemType,
 			'context.period': this._context.period,
 		};
 	}
@@ -141,7 +158,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		}
 
 		uri ??= await ensureWorkingUri(this.container, this.activeTabUri);
-		this.updateUri(uri, true);
+		await this.updateUri(uri, true);
 		if (this.host.isHost('editor')) {
 			this.fireFileSelected();
 		}
@@ -195,10 +212,15 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 	}
 
 	async onVisibilityChanged(visible: boolean): Promise<void> {
-		if (!visible) return;
+		if (!visible) {
+			this._repositorySubscription?.pause();
+			return;
+		}
+
+		this._repositorySubscription?.resume();
 
 		if (this.host.isHost('view')) {
-			this.updateUri(await ensureWorkingUri(this.container, this.activeTabUri));
+			await this.updateUri(await ensureWorkingUri(this.container, this.activeTabUri));
 		}
 	}
 
@@ -238,12 +260,58 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 					{ source: this.host.id },
 				);
 
+				function getFilesFilter(folderUri: Uri, sha: string): (f: GitFileChange) => boolean {
+					if (isUncommitted(sha)) {
+						if (isUncommittedStaged(sha)) {
+							return f => Boolean(f.staged) && isDescendant(f.uri, folderUri);
+						}
+						return f => !f.staged && isDescendant(f.uri, folderUri);
+					}
+					return f => isDescendant(f.uri, folderUri);
+				}
+
 				if (e.params.shift) {
-					void openChangesWithWorking(this._context.uri, commit, {
-						preserveFocus: true,
-						preview: true,
-						viewColumn: this.host.isHost('view') ? undefined : ViewColumn.Beside,
-					});
+					if (this._context.itemType === 'folder') {
+						void openCommitChangesWithWorking(
+							this.container,
+							commit,
+							false,
+							{
+								preserveFocus: true,
+								preview: true,
+								// Since the multi-diff editor doesn't support choosing the view column, we need to do it manually so passing in our view column
+								sourceViewColumn: this.host.viewColumn,
+								viewColumn: this.host.isHost('view') ? undefined : ViewColumn.Beside,
+								title: `Folder Changes in ${shortenRevision(commit.sha, {
+									strings: { working: 'Working Tree' },
+								})}`,
+							},
+							getFilesFilter(this._context.uri, commit.sha),
+						);
+					} else {
+						void openChangesWithWorking(this._context.uri, commit, {
+							preserveFocus: true,
+							preview: true,
+							viewColumn: this.host.isHost('view') ? undefined : ViewColumn.Beside,
+						});
+					}
+				} else if (this._context.itemType === 'folder') {
+					void openCommitChanges(
+						this.container,
+						commit,
+						false,
+						{
+							preserveFocus: true,
+							preview: true,
+							// Since the multi-diff editor doesn't support choosing the view column, we need to do it manually so passing in our view column
+							sourceViewColumn: this.host.viewColumn,
+							viewColumn: this.host.isHost('view') ? undefined : ViewColumn.Beside,
+							title: `Folder Changes in ${shortenRevision(commit.sha, {
+								strings: { working: 'Working Tree' },
+							})}`,
+						},
+						getFilesFilter(this._context.uri, commit.sha),
+					);
 				} else {
 					void openChanges(this._context.uri, commit, {
 						preserveFocus: true,
@@ -284,13 +352,13 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		if (uri == null) {
 			this._tabCloseDebounceTimer = setTimeout(() => {
 				this._tabCloseDebounceTimer = undefined;
-				this.updateUri(uri);
+				void this.updateUri(uri);
 			}, 1000);
 
 			return;
 		}
 
-		this.updateUri(uri);
+		void this.updateUri(uri);
 	}
 
 	@debug({ args: false })
@@ -302,7 +370,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 			uri = undefined;
 		}
 
-		this.updateUri(await ensureWorkingUri(this.container, uri ?? this.activeTabUri));
+		void this.updateUri(await ensureWorkingUri(this.container, uri ?? this.activeTabUri));
 	}
 
 	private fireFileSelected() {
@@ -340,6 +408,24 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 	}
 
 	@debug({ args: false })
+	private onRepositoryWipChanged(e: RepositoryFileSystemChangeEvent) {
+		if (e.repository.id !== this._repositorySubscription?.source?.id) return;
+
+		if (this._context.etagRepositoryWip !== e.repository.etagFileSystem) {
+			this._context.etagRepositoryWip = e.repository.etagFileSystem;
+
+			if (
+				this._context.uri != null &&
+				((this._context.itemType === 'folder' && e.uris.some(u => isDescendant(u, this._context.uri!))) ||
+					(this._context.itemType === 'file' &&
+						e.uris.some(u => u.toString() === this._context.uri!.toString())))
+			) {
+				this.updateState();
+			}
+		}
+	}
+
+	@debug({ args: false })
 	private onSubscriptionChanged(e: SubscriptionChangeEvent) {
 		if (this._context.etagSubscription !== e.etag) {
 			this._context.etagSubscription = e.etag;
@@ -353,43 +439,44 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		const shortDateFormat = configuration.get('defaultDateShortFormat') ?? 'short';
 		const period = context.period ?? defaultPeriod;
 
-		const gitUri = context.uri != null ? await GitUri.fromUri(context.uri) : undefined;
-		const repoPath = gitUri?.repoPath;
-		const isFolder = context.uri != null ? await isFolderUri(context.uri) : false;
+		const uri = context.uri;
+		const gitUri = uri != null ? await GitUri.fromUri(uri) : undefined;
+		const itemType = context.itemType ?? 'file';
 
-		if (this.host.isHost('editor')) {
-			const title = isFolder ? 'Visual Folder History' : 'Visual File History';
-			this.host.title = gitUri == null ? title : `${title}: ${gitUri.fileName}`;
+		let title;
+		let path;
+		if (itemType === 'folder') {
+			title = gitUri?.directory ?? '';
+			path = title;
 		} else {
-			// Currently the view can only show files, so we don't need to change the name
-			this.host.description = gitUri?.fileName ?? proBadge;
+			title = gitUri?.fileName ?? '';
+			path = gitUri?.relativePath ?? '';
 		}
 
-		const access = await this.container.git.access(PlusFeatures.Timeline, repoPath);
+		const item: State['item'] = {
+			type: itemType,
+			path: path,
+			sha: gitUri?.shortSha || undefined,
+		};
+
+		if (this.host.isHost('editor')) {
+			this.host.title = `Visual ${itemType === 'folder' ? 'Folder' : 'File'} History${title ? `: ${title}` : ''}`;
+		} else {
+			this.host.description = title || proBadge;
+		}
+
+		const access = await this.container.git.access(PlusFeatures.Timeline, gitUri?.repoPath);
 		if (access.allowed === false) {
 			return {
 				...this.host.baseWebviewState,
 				dataset: Promise.resolve(generateRandomTimelineDataset()),
 				period: period,
-				title: 'src/app/index.ts',
-				sha: undefined,
 				uri: context.uri?.toString(),
-				uriType: isFolder ? 'folder' : 'file',
-				abbreviatedShaLength: this.container.CommitShaFormatting.length,
-				dateFormat: dateFormat,
-				shortDateFormat: shortDateFormat,
-				access: access,
-			};
-		}
-
-		if (context.uri == null || gitUri == null || repoPath == null) {
-			return {
-				...this.host.baseWebviewState,
-				period: period,
-				title: gitUri?.relativePath,
-				sha: gitUri?.shortSha,
-				uri: context.uri?.toString(),
-				uriType: isFolder ? 'folder' : 'file',
+				item: {
+					type: 'file',
+					path: 'src/app/index.ts',
+					sha: undefined,
+				},
 				abbreviatedShaLength: this.container.CommitShaFormatting.length,
 				dateFormat: dateFormat,
 				shortDateFormat: shortDateFormat,
@@ -399,12 +486,11 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 
 		return {
 			...this.host.baseWebviewState,
-			dataset: this.getDataset(gitUri, period),
+			dataset:
+				context.uri != null && gitUri?.repoPath != null ? this.getDataset(gitUri, itemType, period) : undefined,
 			period: period,
-			title: gitUri.relativePath,
-			sha: gitUri.shortSha,
-			uri: context.uri.toString(),
-			uriType: isFolder ? 'folder' : 'file',
+			uri: context.uri?.toString(),
+			item: item,
 			abbreviatedShaLength: this.container.CommitShaFormatting.length,
 			dateFormat: dateFormat,
 			shortDateFormat: shortDateFormat,
@@ -412,16 +498,16 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		};
 	}
 
-	private async getDataset(gitUri: GitUri, period: Period): Promise<Commit[]> {
+	private async getDataset(gitUri: GitUri, itemType: Context['itemType'], period: TimelinePeriod): Promise<Commit[]> {
 		const repoPath = gitUri.repoPath!;
 
-		const [currentUserResult, logResult, statusFileResult] = await Promise.allSettled([
+		const [currentUserResult, logResult, statusFilesResult] = await Promise.allSettled([
 			this.container.git.config(repoPath).getCurrentUser(),
 			this.container.git.commits(repoPath).getLogForFile(gitUri.fsPath, gitUri.sha, {
 				limit: 0,
 				since: getPeriodDate(period)?.toISOString(),
 			}),
-			this.container.git.status(repoPath).getStatusForFile?.(gitUri),
+			this.container.git.status(repoPath).getStatusForPath?.(gitUri),
 		]);
 
 		const log = getSettledValue(logResult);
@@ -430,7 +516,11 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		const currentUser = getSettledValue(currentUserResult);
 
 		let queryRequiredCommits = [
-			...filter(log.commits.values(), c => c.file?.stats == null && getChangedFilesCount(c.stats?.files) !== 1),
+			...filter(log.commits.values(), c =>
+				itemType === 'file'
+					? c.file?.stats == null && getChangedFilesCount(c.stats?.files) !== 1
+					: c.stats == null,
+			),
 		];
 
 		if (queryRequiredCommits.length !== 0) {
@@ -453,45 +543,44 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 
 		const name = currentUser?.name ? `${currentUser.name} (you)` : 'You';
 
-		const dataset: Commit[] = [];
-		for (const commit of log.commits.values()) {
-			const stats =
-				commit.file?.stats ?? (getChangedFilesCount(commit.stats?.files) === 1 ? commit.stats : undefined);
-			dataset.push({
+		function toDatum(commit: GitCommit): Commit {
+			let additions: number | undefined;
+			let deletions: number | undefined;
+			let files: number | undefined;
+			if (itemType === 'file') {
+				const stats =
+					commit.file?.stats ?? (getChangedFilesCount(commit.stats?.files) === 1 ? commit.stats : undefined);
+				additions = stats?.additions;
+				deletions = stats?.deletions;
+				files = undefined;
+			} else {
+				files = getChangedFilesCount(commit.stats?.files);
+				additions = commit.stats?.additions;
+				deletions = commit.stats?.deletions;
+			}
+
+			return {
 				author: commit.author.name === 'You' ? name : commit.author.name,
-				additions: stats?.additions,
-				deletions: stats?.deletions,
+				files: files,
+				additions: additions,
+				deletions: deletions,
 				sha: commit.sha,
 				date: commit.date.toISOString(),
 				message: commit.message ?? commit.summary,
 				sort: commit.date.getTime(),
-			});
+			};
 		}
 
-		const statusFile = getSettledValue(statusFileResult);
-		const pseudoCommits = statusFile?.getPseudoCommits(this.container, currentUser);
-		if (pseudoCommits != null) {
-			dataset.splice(
-				0,
-				0,
-				...pseudoCommits.map(commit => {
-					const stats =
-						commit.file?.stats ??
-						(getChangedFilesCount(commit.stats?.files) === 1 ? commit.stats : undefined);
-					return {
-						author: commit.author.name === 'You' ? name : commit.author.name,
-						additions: stats?.additions,
-						deletions: stats?.deletions,
-						sha: commit.sha,
-						date: commit.date.toISOString(),
-						message: commit.message ?? commit.summary,
-						sort: commit.date.getTime(),
-					} satisfies Commit;
-				}),
-			);
+		const dataset = [...map(log.commits.values(), toDatum)];
+
+		const statusFiles = getSettledValue(statusFilesResult);
+		const pseudoCommits = await getPseudoCommitsWithStats(this.container, statusFiles, currentUser);
+		if (pseudoCommits?.length) {
+			dataset.splice(0, 0, ...map(pseudoCommits, toDatum));
 		} else {
 			dataset.splice(0, 0, {
 				author: name,
+				files: 0,
 				additions: 0,
 				deletions: 0,
 				sha: '',
@@ -506,7 +595,9 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		return dataset;
 	}
 
-	private updateUri(uri: Uri | undefined, silent?: boolean) {
+	private _repositorySubscription: SubscriptionManager<Repository> | undefined;
+
+	private async updateUri(uri: Uri | undefined, silent?: boolean) {
 		if (this._tabCloseDebounceTimer != null) {
 			clearTimeout(this._tabCloseDebounceTimer);
 			this._tabCloseDebounceTimer = undefined;
@@ -514,10 +605,19 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 
 		if (uriEquals(uri, this._context.uri)) return;
 
+		this._repositorySubscription?.dispose();
+		this._repositorySubscription = undefined;
+
 		let etag;
 		if (uri != null) {
-			const repository = this.container.git.getRepository(uri);
-			etag = repository?.etag ?? 0;
+			const repo = this.container.git.getRepository(uri);
+			if (repo != null) {
+				this._repositorySubscription = new SubscriptionManager(repo, r => this.subscribeToRepository(r));
+				if (this.host.visible) {
+					this._repositorySubscription.start();
+				}
+			}
+			etag = repo?.etag ?? 0;
 		} else {
 			etag = 0;
 		}
@@ -525,12 +625,39 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		if (this._context.etagRepository !== etag || this._context.uri?.toString() !== uri?.toString()) {
 			this._context.etagRepository = etag;
 			this._context.uri = uri;
+			if (uri != null) {
+				if (isFolderGlobUri(uri)) {
+					this._context.itemType = 'folder';
+				} else {
+					const isFolder = await isFolderUri(uri);
+					if (isFolder) {
+						this._context.uri = getFolderGlobUri(uri);
+						this._context.itemType = 'folder';
+					} else {
+						this._context.itemType = 'file';
+					}
+				}
+			} else {
+				this._context.itemType = undefined;
+			}
 
 			if (silent) return;
 
 			this.container.telemetry.sendEvent('timeline/editor/changed', this.getTelemetryContext());
 			this.updateState();
 		}
+	}
+
+	private subscribeToRepository(repo: Repository): Disposable {
+		this._context.etagRepository = repo.etag;
+		this._context.etagRepositoryWip = repo.etagFileSystem;
+
+		return Disposable.from(
+			// TODO: advanced configuration for the watchFileSystem timing
+			repo.watchFileSystem(1000),
+			repo.onDidChangeFileSystem(this.onRepositoryWipChanged, this),
+			repo.onDidChange(this.onRepositoryChanged, this),
+		);
 	}
 
 	private _notifyDidChangeStateDebounced: Deferrable<() => void> | undefined = undefined;
@@ -556,7 +683,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 	}
 }
 
-function getPeriodDate(period: Period): Date | undefined {
+function getPeriodDate(period: TimelinePeriod): Date | undefined {
 	if (period === 'all') return undefined;
 
 	const [number, unit] = period.split('|');
@@ -599,6 +726,7 @@ function generateRandomTimelineDataset(): Commit[] {
 			author: authors[Math.floor(Math.random() * authors.length)],
 			date: date.toISOString(),
 			message: '',
+			files: 1,
 			// Generate random additions/deletions between 1 and 20, but ensure we have a tiny and large commit
 			additions: i === 0 ? 2 : i === count - 1 ? 50 : Math.floor(Math.random() * 20) + 1,
 			deletions: i === 0 ? 1 : i === count - 1 ? 25 : Math.floor(Math.random() * 20) + 1,

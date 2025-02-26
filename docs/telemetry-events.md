@@ -1911,7 +1911,8 @@ or
 
 ```typescript
 {
-  'context.period': string,
+  'context.itemType': 'file' | 'folder',
+  'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
@@ -1925,7 +1926,8 @@ or
 
 ```typescript
 {
-  'context.period': string,
+  'context.itemType': 'file' | 'folder',
+  'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
@@ -1939,7 +1941,8 @@ or
 
 ```typescript
 {
-  'context.period': string,
+  'context.itemType': 'file' | 'folder',
+  'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
@@ -1953,7 +1956,8 @@ or
 
 ```typescript
 {
-  'context.period': string,
+  'context.itemType': 'file' | 'folder',
+  'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
@@ -1984,7 +1988,8 @@ or
 {
   'context.config.allowMultiple': boolean,
   'context.config.queryLimit': number,
-  'context.period': string,
+  'context.itemType': 'file' | 'folder',
+  'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,

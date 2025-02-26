@@ -653,7 +653,10 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 
 		const scope = getLogScope();
 
-		const relativePath = this.provider.getRelativePath(pathOrUri, repoPath);
+		let relativePath = this.provider.getRelativePath(pathOrUri, repoPath);
+		if (relativePath.endsWith('/*')) {
+			relativePath = relativePath.slice(0, -2);
+		}
 
 		if (repoPath != null && repoPath === relativePath) {
 			throw new Error(`File name cannot match the repository path; path=${relativePath}`);
