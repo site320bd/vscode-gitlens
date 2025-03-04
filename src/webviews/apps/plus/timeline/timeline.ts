@@ -50,8 +50,19 @@ export class GlTimelineApp extends GlApp<State> {
 		setAbbreviatedShaLength(this.state.config.abbreviatedShaLength);
 	}
 
-	get allowed(): boolean | 'mixed' {
+	@state()
+	private _loading = false;
+
+	get allowed() {
 		return this.state.access?.allowed ?? false;
+	}
+
+	get base() {
+		return this.config.base ?? this.repository?.ref;
+	}
+
+	get config() {
+		return this.state.config;
 	}
 
 	get header(): { title: string; description: string } {
@@ -74,22 +85,19 @@ export class GlTimelineApp extends GlApp<State> {
 		return this.state.item.type;
 	}
 
-	@state()
-	private _loading = false;
-
-	get config(): State['config'] {
-		return this.state.config;
+	get sliceBy() {
+		return this.config.showAllBranches ? this.config.sliceBy : 'author';
 	}
 
-	get repository(): State['repository'] {
+	get repository() {
 		return this.state.repository;
 	}
 
-	get subscription(): State['access']['subscription']['current'] | undefined {
+	get subscription() {
 		return this.state.access?.subscription?.current;
 	}
 
-	get uri(): string | undefined {
+	get uri() {
 		return this.state.uri;
 	}
 
@@ -113,9 +121,7 @@ export class GlTimelineApp extends GlApp<State> {
 						<span class="details__ref"
 							>${this.config.showAllBranches
 								? 'All Branches'
-								: html`<gl-ref-name
-										.ref=${this.config.ref ?? this.repository?.ref}
-								  ></gl-ref-name>`}</span
+								: html`<gl-ref-name .ref=${this.base}></gl-ref-name>`}</span
 						>
 						${this.renderTimeframe()}
 					</span>
@@ -157,7 +163,9 @@ export class GlTimelineApp extends GlApp<State> {
 			id="chart"
 			placement="${this.placement}"
 			dateFormat="${this.state.config.dateFormat}"
+			head="${this.base?.ref ?? 'HEAD'}"
 			shortDateFormat="${this.state.config.shortDateFormat}"
+			sliceBy="${this.sliceBy}"
 			.dataPromise=${this.state.dataset}
 			@gl-commit-select=${this.onChartCommitSelected}
 			@gl-loading=${(e: CustomEvent<Promise<void>>) => {
@@ -170,6 +178,7 @@ export class GlTimelineApp extends GlApp<State> {
 
 	private renderConfigPopover() {
 		const { period, showAllBranches } = this.config;
+		const sliceBy = this.sliceBy;
 
 		return html`<gl-popover class="config" placement="bottom" trigger="hover focus click" hoist>
 			<gl-button slot="anchor" appearance="toolbar">
@@ -178,10 +187,31 @@ export class GlTimelineApp extends GlApp<State> {
 			<div slot="content" class="config__content">
 				<menu-label>View Options</menu-label>
 				<section>
+					<label for="base">Base</label>
+					<gl-ref-button
+						name="base"
+						tooltip="Change Base Reference"
+						.ref=${this.base}
+						@click=${this.onChooseRef}
+					></gl-ref-button>
+				</section>
+				<section>
+					<gl-checkbox
+						value="all"
+						.checked=${showAllBranches}
+						@gl-change-value=${(e: CustomEvent<void>) => {
+							this._ipc.sendCommand(UpdateConfigCommand, {
+								showAllBranches: (e.target as Checkbox).checked,
+							});
+						}}
+						>View All Branches</gl-checkbox
+					>
+				</section>
+				<section>
 					<span class="select-container">
 						<label for="periods">Timeframe</label>
 						<select
-							class="period"
+							class="select"
 							name="periods"
 							position="below"
 							.value=${period}
@@ -200,26 +230,20 @@ export class GlTimelineApp extends GlApp<State> {
 					</span>
 				</section>
 				<section>
-					<label for="base" ?disabled=${showAllBranches}>Base Ref&nbsp;&nbsp;</label>
-					<gl-ref-button
-						name="base"
-						?disabled=${showAllBranches}
-						tooltip="Change Base Reference"
-						.ref=${this.config.ref ?? this.repository?.ref}
-						@click=${this.onChooseRef}
-					></gl-ref-button>
-				</section>
-				<section>
-					<gl-checkbox
-						value="all"
-						.checked=${showAllBranches}
-						@gl-change-value=${(e: CustomEvent<void>) => {
-							this._ipc.sendCommand(UpdateConfigCommand, {
-								showAllBranches: (e.target as Checkbox).checked,
-							});
-						}}
-						>View All Branches</gl-checkbox
-					>
+					<span class="select-container">
+						<label for="sliceBy" ?disabled=${!showAllBranches}>Slice By</label>
+						<select
+							class="select"
+							name="sliceBy"
+							position="below"
+							.value=${sliceBy}
+							?disabled=${!showAllBranches}
+							@change=${this.onSliceByChanged}
+						>
+							<option value="author" ?selected=${sliceBy === 'author'}>Author</option>
+							<option value="branch" ?selected=${sliceBy === 'branch'}>Branch</option>
+						</select>
+					</span>
 				</section>
 			</div>
 		</gl-popover>`;
@@ -267,9 +291,15 @@ export class GlTimelineApp extends GlApp<State> {
 		const value = element.options[element.selectedIndex].value;
 		assertPeriod(value);
 
-		// this.log(`onPeriodChanged(): name=${element.name}, value=${value}`);
-
 		this._ipc.sendCommand(UpdateConfigCommand, { period: value });
+	}
+
+	private onSliceByChanged(e: Event) {
+		const element = e.target as HTMLSelectElement;
+		const value = element.options[element.selectedIndex].value;
+		assertSliceBy(value);
+
+		this._ipc.sendCommand(UpdateConfigCommand, { sliceBy: value });
 	}
 
 	private _fireSelectDataPointDebounced: Deferrable<(e: CommitEventDetail) => void> | undefined;
@@ -289,5 +319,11 @@ function assertPeriod(period: string): asserts period is State['config']['period
 	const [value, unit] = period.split('|');
 	if (isNaN(Number(value)) || (unit !== 'D' && unit !== 'M' && unit !== 'Y')) {
 		throw new Error(`Invalid period: ${period}`);
+	}
+}
+
+function assertSliceBy(sliceBy: string): asserts sliceBy is State['config']['sliceBy'] {
+	if (sliceBy !== 'author' && sliceBy !== 'branch') {
+		throw new Error(`Invalid slice by: ${sliceBy}`);
 	}
 }

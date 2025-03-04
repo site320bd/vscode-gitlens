@@ -8,9 +8,10 @@ export const scope: IpcScope = 'timeline';
 export interface State extends WebviewState {
 	dataset?: Promise<Commit[]>;
 	config: {
-		period: TimelinePeriod;
-		ref: GitReference | undefined;
+		base: GitReference | undefined;
 		showAllBranches: boolean;
+		period: TimelinePeriod;
+		sliceBy: TimelineSliceBy;
 
 		abbreviatedShaLength: number;
 		dateFormat: string;
@@ -39,6 +40,8 @@ export interface Commit {
 	date: string;
 	message: string;
 
+	branches?: string[];
+
 	files: number | undefined;
 	additions: number | undefined;
 	deletions: number | undefined;
@@ -48,6 +51,7 @@ export interface Commit {
 
 export type TimelineItemType = 'file' | 'folder';
 export type TimelinePeriod = `${number}|${'D' | 'M' | 'Y'}` | 'all';
+export type TimelineSliceBy = 'author' | 'branch';
 
 // COMMANDS
 
@@ -63,6 +67,7 @@ export const SelectDataPointCommand = new IpcCommand<SelectDataPointParams>(scop
 export interface UpdateConfigParams {
 	period?: TimelinePeriod;
 	showAllBranches?: boolean;
+	sliceBy?: TimelineSliceBy;
 }
 export const UpdateConfigCommand = new IpcCommand<UpdateConfigParams>(scope, 'config/update');
 

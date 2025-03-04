@@ -189,7 +189,7 @@ export const timelineStyles = css`
 		color: var(--vscode-foreground);
 	}
 
-	.period {
+	.select {
 		-webkit-appearance: none;
 		-moz-appearance: none;
 		appearance: none;
@@ -242,11 +242,13 @@ export const timelineStyles = css`
 		gap: 0.8rem;
 		max-width: 30rem;
 		min-width: 20rem;
+
+		margin-bottom: 0.4rem;
 	}
 
 	.config__content menu-label {
 		padding: 0;
-		margin-bottom: -0.8rem;
+		margin-bottom: -0.4rem;
 	}
 
 	.config__content section {

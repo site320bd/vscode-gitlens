@@ -39,7 +39,7 @@ import type { Deferrable } from '../../../system/function/debounce';
 import { debounce } from '../../../system/function/debounce';
 import { filter, map } from '../../../system/iterable';
 import { flatten } from '../../../system/object';
-import { getSettledValue } from '../../../system/promise';
+import { batch, getSettledValue } from '../../../system/promise';
 import { SubscriptionManager } from '../../../system/subscriptionManager';
 import { createDisposable } from '../../../system/unifiedDisposable';
 import { uriEquals } from '../../../system/uri';
@@ -48,12 +48,17 @@ import type { IpcMessage } from '../../protocol';
 import type { WebviewHost, WebviewProvider, WebviewShowingArgs } from '../../webviewProvider';
 import type { WebviewShowOptions } from '../../webviewsController';
 import { isSerializedState } from '../../webviewsController';
-import type { Commit, State, TimelineItemType, TimelinePeriod } from './protocol';
+import type { Commit, State, TimelineItemType, TimelinePeriod, TimelineSliceBy } from './protocol';
 import { ChooseRefRequest, DidChangeNotification, SelectDataPointCommand, UpdateConfigCommand } from './protocol';
 import type { TimelineWebviewShowingArgs } from './registration';
 
 interface Context {
-	config: { period: TimelinePeriod; ref: GitReference | undefined; showAllBranches: boolean };
+	config: {
+		base: GitReference | undefined;
+		period: TimelinePeriod;
+		showAllBranches: boolean;
+		sliceBy: TimelineSliceBy;
+	};
 	uri: Uri | undefined;
 	itemType: TimelineItemType | undefined;
 	etagRepositories: number | undefined;
@@ -77,7 +82,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		private readonly host: WebviewHost<'gitlens.views.timeline' | 'gitlens.timeline'>,
 	) {
 		this._context = {
-			config: { period: defaultPeriod, ref: undefined, showAllBranches: false },
+			config: { period: defaultPeriod, base: undefined, showAllBranches: false, sliceBy: 'author' },
 			uri: undefined,
 			itemType: undefined,
 			etagRepositories: this.container.git.etag,
@@ -138,6 +143,8 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 			...this.host.getTelemetryContext(),
 			'context.itemType': this._context.itemType,
 			'context.period': this._context.config.period,
+			'context.showAllBranches': this._context.config.showAllBranches,
+			'context.sliceBy': this._context.config.sliceBy,
 		};
 	}
 
@@ -154,7 +161,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 			} else if (isViewFileOrFolderNode(arg)) {
 				uri = arg.uri;
 			} else if (isSerializedState<State>(arg)) {
-				this._context.config = arg.state.config ?? this._context.config;
+				this._context.config = { ...this._context.config, ...arg.state.config };
 				if (this.host.isHost('editor')) {
 					uri = arg.state.uri != null ? Uri.parse(arg.state.uri) : undefined;
 				}
@@ -173,15 +180,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 
 		const cfg = flatten(configuration.get('visualHistory'), 'context.config', { joinArrays: true });
 
-		return [
-			true,
-			{
-				...this.getTelemetryContext(),
-				...cfg,
-				'context.period': this._context.config.period,
-				// TODO
-			},
-		];
+		return [true, { ...this.getTelemetryContext(), ...cfg }];
 	}
 
 	includeBootstrap(): Promise<State> {
@@ -234,7 +233,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 			case ChooseRefRequest.is(e): {
 				const { config, uri } = this._context;
 
-				let ref = config.ref;
+				let ref = config.base;
 				using respond = createDisposable(() => void this.host.respond(ChooseRefRequest, e, { ref: ref }));
 
 				if (uri == null) return;
@@ -257,7 +256,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 				if (pick == null) return;
 
 				ref = getReference(pick);
-				config.ref = ref.ref === 'HEAD' ? undefined : ref;
+				config.base = ref.ref === 'HEAD' ? undefined : ref;
 
 				respond.dispose();
 				this.updateState(true);
@@ -270,22 +269,20 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 				const repo = this.container.git.getRepository(this._context.uri);
 				if (repo == null) return;
 
-				if (e.params.id === '') {
-					this.container.telemetry.sendEvent('timeline/commit/selected', this.getTelemetryContext());
+				this.container.telemetry.sendEvent('timeline/commit/selected', this.getTelemetryContext());
 
+				if (e.params.id === '') {
 					void openEditor(this._context.uri, {
 						preserveFocus: true,
 						preview: true,
 						viewColumn: this.host.isHost('view') ? undefined : ViewColumn.Beside,
 					});
 
-					break;
+					return;
 				}
 
 				const commit = await repo.git.commits().getCommit(e.params.id);
 				if (commit == null) return;
-
-				this.container.telemetry.sendEvent('timeline/commit/selected', this.getTelemetryContext());
 
 				this.container.events.fire(
 					'commit:selected',
@@ -374,11 +371,17 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 					config.showAllBranches = e.params.showAllBranches;
 				}
 
+				if (e.params.sliceBy != null && e.params.sliceBy !== config.sliceBy) {
+					changed = true;
+					config.sliceBy = e.params.sliceBy;
+				}
+
 				if (changed) {
 					this.container.telemetry.sendEvent('timeline/config/changed', {
 						...this.getTelemetryContext(),
 						period: config.period,
 						showAllBranches: config.showAllBranches,
+						sliceBy: config.sliceBy,
 					});
 
 					this.updateState(true);
@@ -564,7 +567,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 	): Promise<Commit[]> {
 		const [currentUserResult, logResult, statusFilesResult] = await Promise.allSettled([
 			repo.git.config().getCurrentUser(),
-			repo.git.commits().getLogForFile(uri.fsPath, config.ref?.ref, {
+			repo.git.commits().getLogForFile(uri.fsPath, config.base?.ref, {
 				all: config.showAllBranches,
 				limit: 0,
 				since: getPeriodDate(config.period)?.toISOString(),
@@ -633,6 +636,21 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		}
 
 		const dataset = [...map(log.commits.values(), toDatum)];
+
+		if (config.showAllBranches && config.sliceBy === 'branch') {
+			const shas = await repo.git.commits().getCommitsForFile?.(uri, { all: true, excludeReachableFrom: 'HEAD' });
+
+			const commitsUnreachableFromHEAD = dataset.filter(d => shas?.includes(d.sha));
+			await batch(
+				commitsUnreachableFromHEAD,
+				10, // Process 10 commits at a time
+				async datum => {
+					datum.branches = await repo.git
+						.branches()
+						.getBranchesWithCommits([datum.sha], undefined, { all: true, mode: 'contains' });
+				},
+			);
+		}
 
 		const statusFiles = getSettledValue(statusFilesResult);
 		const pseudoCommits = await getPseudoCommitsWithStats(this.container, statusFiles, currentUser);

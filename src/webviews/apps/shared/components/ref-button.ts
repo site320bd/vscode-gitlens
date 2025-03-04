@@ -23,12 +23,17 @@ export class GlRefButton extends LitElement {
 		.label {
 			display: inline-flex;
 			flex-direction: row;
+			gap: 0.2rem;
 			max-width: 100%;
 		}
 
+		gl-ref-name {
+			text-decoration: underline;
+			text-underline-offset: 2px;
+		}
+
 		.chevron {
-			margin-left: 0.2rem;
-			vertical-align: middle;
+			align-self: center;
 		}
 	`;
 

@@ -995,6 +995,28 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 	}
 
 	@log()
+	async getCommitsForFile(
+		repoPath: string,
+		uri: Uri,
+		options?: { all?: boolean; excludeReachableFrom?: string },
+	): Promise<string[]> {
+		const path = this.provider.getRelativePath(uri, repoPath);
+		const data = (
+			await this.git.exec(
+				{ cwd: repoPath },
+				'rev-list',
+				options?.all ? '--all' : undefined,
+				options?.excludeReachableFrom ? `^${options.excludeReachableFrom}` : undefined,
+				'--',
+				path,
+			)
+		)?.trim();
+		if (!data) return [];
+
+		return data.split('\n').filter(Boolean);
+	}
+
+	@log()
 	async hasCommitBeenPushed(repoPath: string, rev: string): Promise<boolean> {
 		if (repoPath == null) return false;
 

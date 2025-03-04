@@ -57,7 +57,7 @@ export const timelineChartStyles = css`
 	}
 
 	.bb svg {
-		font: 10px sans-serif;
+		font: 10px var(--font-family);
 		-webkit-tap-highlight-color: rgba(0, 0, 0, 0);
 	}
 
@@ -80,7 +80,6 @@ export const timelineChartStyles = css`
 	.bb .bb-button {
 		user-select: none;
 		fill: var(--color-view-foreground);
-		font-size: 11px;
 	}
 
 	.bb .bb-event-rects,
@@ -99,6 +98,10 @@ export const timelineChartStyles = css`
 	.bb .bb-event-rect,
 	.bb .bb-bars path {
 		shape-rendering: crispEdges;
+	}
+
+	.bb .bb-legend-item text {
+		fill: var(--color-foreground--85);
 	}
 
 	.bb .bb-legend-item-tile {
@@ -268,7 +271,7 @@ export const timelineChartStyles = css`
 	}
 
 	.bb .bb-title {
-		font: 14px sans-serif;
+		font: 14px var(--font-family);
 	}
 
 	.bb .bb-tooltip-container {
@@ -384,14 +387,19 @@ export const timelineChartStyles = css`
 		font-weight: 600;
 	}
 
+	.bb-tooltip .branches {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		/* font-family: var(--vscode-editor-font-family); */
+	}
+
 	.bb-tooltip .sha {
-		/* font-family: monospace; */
-		background: var(--vscode-textCodeBlock-background);
-		border-radius: 0.3rem;
-		padding: 0.1rem 0.4rem 0.2rem 0.4rem;
-		margin-right: 0.2rem;
-		/* font-size: var(--vscode-editor-font-size); */
+		/* background: var(--vscode-textCodeBlock-background);
+		border-radius: 0.3rem; */
+		/* padding: 0.1rem 0.4rem 0.2rem 0.4rem; */
 		font-family: var(--vscode-editor-font-family);
+		margin-right: 0.4rem;
 	}
 
 	.bb-tooltip .additions {

@@ -1913,6 +1913,8 @@ or
 {
   'context.itemType': 'file' | 'folder',
   'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'context.showAllBranches': boolean,
+  'context.sliceBy': 'author' | 'branch',
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
@@ -1928,6 +1930,8 @@ or
 {
   'context.itemType': 'file' | 'folder',
   'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'context.showAllBranches': boolean,
+  'context.sliceBy': 'author' | 'branch',
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
@@ -1943,12 +1947,15 @@ or
 {
   'context.itemType': 'file' | 'folder',
   'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'context.showAllBranches': boolean,
+  'context.sliceBy': 'author' | 'branch',
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
   'context.webview.type': string,
   'period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
-  'showAllBranches': boolean
+  'showAllBranches': boolean,
+  'sliceBy': 'author' | 'branch'
 }
 ```
 
@@ -1960,6 +1967,8 @@ or
 {
   'context.itemType': 'file' | 'folder',
   'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'context.showAllBranches': boolean,
+  'context.sliceBy': 'author' | 'branch',
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
@@ -1990,6 +1999,8 @@ or
   'context.config.queryLimit': number,
   'context.itemType': 'file' | 'folder',
   'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'context.showAllBranches': boolean,
+  'context.sliceBy': 'author' | 'branch',
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,

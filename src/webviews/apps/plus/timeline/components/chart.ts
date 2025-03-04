@@ -7,8 +7,8 @@ import { shortenRevision } from '../../../../../git/utils/revision.utils';
 import { log } from '../../../../../system/decorators/log';
 import { debounce } from '../../../../../system/function/debounce';
 import { defer } from '../../../../../system/promise';
-import { pluralize } from '../../../../../system/string';
-import type { Commit, State } from '../../../../plus/timeline/protocol';
+import { pluralize, truncateMiddle } from '../../../../../system/string';
+import type { Commit, State, TimelineSliceBy } from '../../../../plus/timeline/protocol';
 import { renderCommitSha } from '../../../shared/components/commit-sha';
 import { GlElement } from '../../../shared/components/element';
 import { createFromDateDelta, formatDate, fromNow } from '../../../shared/date';
@@ -42,7 +42,7 @@ export class GlTimelineChart extends GlElement {
 
 	private _abortController?: AbortController;
 
-	private readonly _authors = new Map<
+	private readonly _slices = new Map<
 		string,
 		{
 			x: string[];
@@ -50,7 +50,7 @@ export class GlTimelineChart extends GlElement {
 			z: Map<string, number>;
 		}
 	>();
-	private readonly _authorsByIndex = new Map<number, string>();
+	private readonly _slicesByIndex = new Map<number, string>();
 	private readonly _commitsByTimestamp = new Map<number, Commit>();
 
 	private _loading?: ReturnType<typeof defer<void>>;
@@ -65,8 +65,14 @@ export class GlTimelineChart extends GlElement {
 	@property()
 	dateFormat!: string;
 
+	@property({ type: String })
+	head?: string;
+
 	@property()
 	shortDateFormat!: string;
+
+	@property()
+	sliceBy: TimelineSliceBy = 'author';
 
 	@state()
 	private _data: Awaited<State['dataset']> | null = null;
@@ -475,15 +481,16 @@ export class GlTimelineChart extends GlElement {
 			chart.$.main.selectAll('.bb-axis-y .tick text tspan').each(function (this, d) {
 				if (this == null) return;
 
-				const author = host._authorsByIndex.get(-(d as { index: number }).index)!;
-				const color = chart.color(author);
+				const slice = host._slicesByIndex.get(-(d as { index: number }).index)!;
+				const color = chart.color(slice);
 
 				const el = this as SVGTSpanElement;
-				// if (host.compact) {
-				el.setAttribute('fill', color);
+				if (host.compact) {
+					el.setAttribute('fill', color);
+				}
 
 				const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-				title.textContent = author;
+				title.textContent = slice;
 				el.appendChild(title);
 				// } else {
 				// 	const suffix = '\u00a0\u00a0⬤';
@@ -521,11 +528,37 @@ export class GlTimelineChart extends GlElement {
 		const types: Record<string, ChartTypes> = { additions: 'bar', deletions: 'bar' };
 		const xs: Record<string, string> = { additions: 'time', deletions: 'time' };
 
-		let nextAuthorIndex = 0;
+		// Clear previous data
+		this._slices.clear();
+		this._slicesByIndex.clear();
+
+		let nextIndex = 0;
+
+		const addSlice = (slice: string, date: string, z: number) => {
+			let sliceInfo = this._slices.get(slice);
+			if (sliceInfo == null) {
+				sliceInfo = {
+					x: [`time.${slice}`, date],
+					y: nextIndex,
+					z: new Map([[date, z]]),
+				};
+				this._slices.set(slice, sliceInfo);
+				this._slicesByIndex.set(nextIndex, slice);
+
+				axes[slice] = 'y';
+				types[slice] = 'scatter';
+				xs[slice] = `time.${slice}`;
+
+				nextIndex--;
+			} else {
+				sliceInfo.x.push(date);
+				sliceInfo.z.set(date, z);
+			}
+		};
 
 		let index = 0;
 		for (const commit of dataset) {
-			const { author, date, additions = 0, deletions = 0 } = commit;
+			const { author, date, additions = 0, deletions = 0, branches } = commit;
 
 			this._commitsByTimestamp.set(new Date(date).getTime(), commit);
 			index++;
@@ -536,29 +569,21 @@ export class GlTimelineChart extends GlElement {
 
 			const z = this.calculateBubbleSize(additions + deletions, metrics);
 
-			let authorInfo = this._authors.get(author);
-			if (authorInfo == null) {
-				authorInfo = {
-					x: [`time.${author}`, date],
-					y: nextAuthorIndex,
-					z: new Map([[date, z]]),
-				};
-				this._authors.set(author, authorInfo);
-				this._authorsByIndex.set(nextAuthorIndex, author);
-
-				axes[author] = 'y';
-				types[author] = 'scatter';
-				xs[author] = `time.${author}`;
-
-				nextAuthorIndex--;
+			if (this.sliceBy === 'branch') {
+				// Slice by branches
+				const commitBranches = branches?.length ? branches : [this.head ?? 'HEAD'];
+				for (const branch of commitBranches) {
+					addSlice(branch, date, z);
+				}
 			} else {
-				authorInfo.x.push(date);
-				authorInfo.z.set(date, z);
+				// Slice by author
+				addSlice(author, date, z);
 			}
 		}
 
 		const columns = [timeSeries, additionsSeries, deletionsSeries];
-		for (const [key, value] of this._authors) {
+
+		for (const [key, value] of this._slices) {
 			columns.push(value.x);
 
 			const y = Array(value.x.length).fill(value.y);
@@ -595,8 +620,8 @@ export class GlTimelineChart extends GlElement {
 		}
 
 		// Clear previous state
-		this._authors.clear();
-		this._authorsByIndex.clear();
+		this._slices.clear();
+		this._slicesByIndex.clear();
 		this._commitsByTimestamp.clear();
 
 		// Calculate quartiles for better distribution
@@ -623,8 +648,9 @@ export class GlTimelineChart extends GlElement {
 		const chartData = this.prepareChartData(data, metrics);
 
 		try {
-			const minY = -(this._authors.size + 1); // The +1 is to leave space at the bottom of the chart for the additions/deletions bars
-			const yTickValues = [...this._authorsByIndex.keys()];
+			const minY = -(this._slices.size + 1); // The +1 is to leave space at the bottom of the chart for the additions/deletions bars
+			const yTickValues = [...this._slicesByIndex.keys()];
+
 			if (this._chart == null) {
 				const options: ChartOptions = {
 					bindto: this.chartContainer,
@@ -633,7 +659,7 @@ export class GlTimelineChart extends GlElement {
 						this.updateChartSize();
 						setTimeout(() => loading?.fulfill(), 250);
 					},
-					onrendered: this.compact ? this.getOnRenderedCallback(this) : undefined,
+					onrendered: this.getOnRenderedCallback(this),
 					// Restore the zoomed domain when the chart is resized, because it gets lost
 					onresized: () => {
 						if (this._chart == null || this.zoomedRange == null) return;
@@ -677,7 +703,10 @@ export class GlTimelineChart extends GlElement {
 							min: minY,
 							padding: { top: 75, bottom: 75 },
 							tick: {
-								format: (y: number) => (this.compact ? '\u{EB99}' : this._authorsByIndex.get(y) ?? ''), // `${this._authorsByIndex.get(y) ?? ''}\u00a0\u00a0⬤`,
+								format: (y: number) => {
+									if (this.compact) return this.sliceBy === 'branch' ? '\u{EA68}' : '\u{EB99}';
+									return truncateMiddle(this._slicesByIndex.get(y) ?? '', 30);
+								},
 								outer: true,
 								values: yTickValues,
 							},
@@ -708,7 +737,7 @@ export class GlTimelineChart extends GlElement {
 						hide: ['additions', 'deletions'],
 						padding: 4,
 						item: {
-							tile: { type: 'circle', r: 4 },
+							tile: { type: 'circle', r: 5 },
 							interaction: { dblclick: true },
 						},
 						tooltip: true,
@@ -729,7 +758,7 @@ export class GlTimelineChart extends GlElement {
 
 							const result = Math.max(
 								6,
-								this._authors.get(d.id)?.z.get((d.x as unknown as Date).toISOString()) ?? 6,
+								this._slices.get(d.id)?.z.get((d.x as unknown as Date).toISOString()) ?? 6,
 							);
 							return result;
 						},
@@ -762,6 +791,12 @@ export class GlTimelineChart extends GlElement {
 								deletionsLabel = `, ${deletionsLabel}`;
 							}
 
+							const branchesSection = commit.branches?.length
+								? /*html*/ `<section class="branches"><code-icon icon="git-branch"></code-icon> ${commit.branches.join(
+										', ',
+								  )}</section>`
+								: '';
+
 							return /*html*/ `<div class="bb-tooltip">
 									<section class="author">${commit.author}</section>
 									<section>
@@ -776,6 +811,7 @@ export class GlTimelineChart extends GlElement {
 											this.dateFormat,
 										)})</span>
 									</section>
+									${branchesSection}
 									<section class="message"><span class="message__content">${commit.message}</span></section>
 								</div>`;
 						},
