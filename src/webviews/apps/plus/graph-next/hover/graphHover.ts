@@ -9,10 +9,11 @@ import type { DidGetRowHoverParams } from '../../../../plus/graph/protocol';
 import { GlElement } from '../../../shared/components/element';
 import type { GlPopover } from '../../../shared/components/overlays/popover';
 import '../../../shared/components/markdown/markdown';
+import '../../../shared/components/overlays/popover';
 
 declare global {
 	interface HTMLElementTagNameMap {
-		'gl-graph-hover': GlGraphHover;
+		'gl-graph-hover-next': GlGraphHover;
 	}
 
 	// interface GlobalEventHandlersEventMap {
@@ -25,7 +26,7 @@ declare global {
 
 type Anchor = string | HTMLElement | { getBoundingClientRect: () => Omit<DOMRect, 'toJSON'> };
 
-@customElement('gl-graph-hover')
+@customElement('gl-graph-hover-next')
 export class GlGraphHover extends GlElement {
 	static override styles = css`
 		gl-popover::part(body) {
@@ -169,7 +170,7 @@ export class GlGraphHover extends GlElement {
 		if (
 			relatedTarget != null &&
 			'closest' in relatedTarget &&
-			(relatedTarget as HTMLElement).closest('gl-graph-hover')
+			(relatedTarget as HTMLElement).closest('gl-graph-hover-next')
 		) {
 			return;
 		}

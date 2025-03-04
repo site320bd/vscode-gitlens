@@ -263,7 +263,7 @@ export class GLGraphWrapper extends SignalWatcher(LitElement) {
 
 	private ref?: GraphContainer;
 
-	@query('gl-graph-hover#commit-hover')
+	@query('gl-graph-hover-next#commit-hover')
 	private readonly graphHover!: GlGraphHover;
 
 	resetHover() {
@@ -275,7 +275,7 @@ export class GLGraphWrapper extends SignalWatcher(LitElement) {
 	}
 
 	override render() {
-		return html`<gl-graph-hover id="commit-hover" distance=${0} skidding=${15}></gl-graph-hover
+		return html`<gl-graph-hover-next id="commit-hover" distance=${0} skidding=${15}></gl-graph-hover-next
 			><web-graph
 				nonce=${ifDefined(this.hostState.nonce)}
 				activeRow=${ifDefined(this.graphAppState.activeRow)}
@@ -298,6 +298,7 @@ export class GLGraphWrapper extends SignalWatcher(LitElement) {
 				.workingTreeStats=${this.hostState.workingTreeStats ?? {}}
 				.paging=${this.hostState.paging ?? {}}
 				.setRef=${(ref: GraphContainer) => {
+					// eslint-disable-next-line lit/no-this-assign-in-render
 					this.ref = ref;
 				}}
 				.filter=${{ ...this.graphAppState.filter }}

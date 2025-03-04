@@ -104,7 +104,7 @@ export class GlGraphMinimapContainer extends GlElement {
 	override render(): unknown {
 		if (this.disabled) return nothing;
 
-		return html`<gl-graph-minimap
+		return html`<gl-graph-minimap-next
 			id="minimap"
 			.activeDay=${this.activeDay}
 			.data=${this.statsByDay}
@@ -112,7 +112,7 @@ export class GlGraphMinimapContainer extends GlElement {
 			.markers=${this.markersByDay}
 			.searchResults=${this.searchResultsByDay}
 			.visibleDays=${this.visibleDays}
-		></gl-graph-minimap>`;
+		></gl-graph-minimap-next>`;
 	}
 
 	select(date: number | Date | undefined, trackOnly: boolean = false): void {

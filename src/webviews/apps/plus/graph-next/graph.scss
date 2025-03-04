@@ -480,6 +480,11 @@ button:not([disabled]),
 	}
 }
 
+.gk-graph {
+	width: 100%;
+	height: 100%;
+}
+
 .gk-graph.bs-tooltip {
 	z-index: 1040;
 }
@@ -1013,7 +1018,7 @@ web-graph {
 }
 
 .gk-graph:not(.ref-zone):not([role='tooltip']) {
-	flex: 1 1 auto;
+	// flex: 1 1 auto;
 	position: relative;
 }
 

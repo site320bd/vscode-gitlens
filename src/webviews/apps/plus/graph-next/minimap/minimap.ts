@@ -79,7 +79,7 @@ const markerZOrder = [
 
 declare global {
 	interface HTMLElementTagNameMap {
-		'gl-graph-minimap': GlGraphMinimap;
+		'gl-graph-minimap-next': GlGraphMinimap;
 	}
 
 	interface GlobalEventHandlersEventMap {
@@ -87,7 +87,7 @@ declare global {
 	}
 }
 
-@customElement('gl-graph-minimap')
+@customElement('gl-graph-minimap-next')
 export class GlGraphMinimap extends GlElement {
 	static override styles = css`
 		:host {

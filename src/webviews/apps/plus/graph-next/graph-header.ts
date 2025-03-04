@@ -718,11 +718,7 @@ export class GlGraphHeader extends SignalWatcher(LitElement) {
 									</span>
 								</div>
 							</gl-popover>
-							<gl-button
-								class="jump-to-ref"
-								appearance="toolbar"
-								@click=${this.handleJumpToRef.bind(this)}
-							>
+							<gl-button class="jump-to-ref" appearance="toolbar" @click=${this.handleJumpToRef}>
 								<code-icon icon="target"></code-icon>
 								<span slot="tooltip">
 									Jump to HEAD
