@@ -16,16 +16,19 @@ import { GitUri } from '../../../git/gitUri';
 import { ensureWorkingUri } from '../../../git/gitUri.utils';
 import type { GitCommit } from '../../../git/models/commit';
 import type { GitFileChange } from '../../../git/models/fileChange';
+import type { GitReference } from '../../../git/models/reference';
 import type {
 	Repository,
 	RepositoryChangeEvent,
 	RepositoryFileSystemChangeEvent,
 } from '../../../git/models/repository';
 import { RepositoryChange, RepositoryChangeComparisonMode } from '../../../git/models/repository';
+import { getReference } from '../../../git/utils/-webview/reference.utils';
 import { getPseudoCommitsWithStats } from '../../../git/utils/-webview/statusFile.utils';
 import { getChangedFilesCount } from '../../../git/utils/commit.utils';
 import { isUncommitted, isUncommittedStaged, shortenRevision } from '../../../git/utils/revision.utils';
 import type { SubscriptionChangeEvent } from '../../../plus/gk/subscriptionService';
+import { ReferencesQuickPickIncludes, showReferencePicker } from '../../../quickpicks/referencePicker';
 import { executeCommand, registerCommand } from '../../../system/-webview/command';
 import { configuration } from '../../../system/-webview/configuration';
 import { getFolderGlobUri, isDescendant, isFolderGlobUri, isFolderUri } from '../../../system/-webview/path';
@@ -38,6 +41,7 @@ import { filter, map } from '../../../system/iterable';
 import { flatten } from '../../../system/object';
 import { getSettledValue } from '../../../system/promise';
 import { SubscriptionManager } from '../../../system/subscriptionManager';
+import { createDisposable } from '../../../system/unifiedDisposable';
 import { uriEquals } from '../../../system/uri';
 import { isViewFileOrFolderNode } from '../../../views/nodes/utils/-webview/node.utils';
 import type { IpcMessage } from '../../protocol';
@@ -45,13 +49,13 @@ import type { WebviewHost, WebviewProvider, WebviewShowingArgs } from '../../web
 import type { WebviewShowOptions } from '../../webviewsController';
 import { isSerializedState } from '../../webviewsController';
 import type { Commit, State, TimelineItemType, TimelinePeriod } from './protocol';
-import { DidChangeNotification, SelectDataPointCommand, UpdatePeriodCommand } from './protocol';
+import { ChooseRefRequest, DidChangeNotification, SelectDataPointCommand, UpdateConfigCommand } from './protocol';
 import type { TimelineWebviewShowingArgs } from './registration';
 
 interface Context {
+	config: { period: TimelinePeriod; ref: GitReference | undefined; showAllBranches: boolean };
 	uri: Uri | undefined;
 	itemType: TimelineItemType | undefined;
-	period: TimelinePeriod | undefined;
 	etagRepositories: number | undefined;
 	etagRepository: number | undefined;
 	etagRepositoryWip: number | undefined;
@@ -73,9 +77,9 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		private readonly host: WebviewHost<'gitlens.views.timeline' | 'gitlens.timeline'>,
 	) {
 		this._context = {
+			config: { period: defaultPeriod, ref: undefined, showAllBranches: false },
 			uri: undefined,
 			itemType: undefined,
-			period: defaultPeriod,
 			etagRepositories: this.container.git.etag,
 			etagRepository: 0,
 			etagRepositoryWip: 0,
@@ -133,7 +137,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		return {
 			...this.host.getTelemetryContext(),
 			'context.itemType': this._context.itemType,
-			'context.period': this._context.period,
+			'context.period': this._context.config.period,
 		};
 	}
 
@@ -150,7 +154,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 			} else if (isViewFileOrFolderNode(arg)) {
 				uri = arg.uri;
 			} else if (isSerializedState<State>(arg)) {
-				this._context.period = arg.state.period;
+				this._context.config = arg.state.config ?? this._context.config;
 				if (this.host.isHost('editor')) {
 					uri = arg.state.uri != null ? Uri.parse(arg.state.uri) : undefined;
 				}
@@ -174,7 +178,8 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 			{
 				...this.getTelemetryContext(),
 				...cfg,
-				'context.period': this._context.period,
+				'context.period': this._context.config.period,
+				// TODO
 			},
 		];
 	}
@@ -226,6 +231,39 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 
 	async onMessageReceived(e: IpcMessage): Promise<void> {
 		switch (true) {
+			case ChooseRefRequest.is(e): {
+				const { config, uri } = this._context;
+
+				let ref = config.ref;
+				using respond = createDisposable(() => void this.host.respond(ChooseRefRequest, e, { ref: ref }));
+
+				if (uri == null) return;
+
+				const repo = this.container.git.getRepository(uri);
+				if (repo == null) return;
+
+				const pick = await showReferencePicker(
+					repo.path,
+					'Choose a Base Reference',
+					'Choose a reference (branch, tag, etc) as the base to view history from',
+					{
+						allowRevisions: { ranges: true },
+						picked: ref?.ref,
+						include: ReferencesQuickPickIncludes.BranchesAndTags | ReferencesQuickPickIncludes.HEAD,
+						sort: true,
+					},
+				);
+
+				if (pick == null) return;
+
+				ref = getReference(pick);
+				config.ref = ref.ref === 'HEAD' ? undefined : ref;
+
+				respond.dispose();
+				this.updateState(true);
+
+				break;
+			}
 			case SelectDataPointCommand.is(e): {
 				if (e.params.id == null || this._context.uri == null) return;
 
@@ -322,17 +360,29 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 
 				break;
 			}
-			case UpdatePeriodCommand.is(e): {
-				if (this._context.period === e.params.period) return;
+			case UpdateConfigCommand.is(e): {
+				const { config } = this._context;
 
-				this.container.telemetry.sendEvent('timeline/period/changed', {
-					...this.getTelemetryContext(),
-					'period.old': this._context.period,
-					'period.new': e.params.period,
-				});
+				let changed = false;
+				if (e.params.period != null && e.params.period !== config.period) {
+					changed = true;
+					config.period = e.params.period;
+				}
 
-				this._context.period = e.params.period;
-				this.updateState(true);
+				if (e.params.showAllBranches != null && e.params.showAllBranches !== config.showAllBranches) {
+					changed = true;
+					config.showAllBranches = e.params.showAllBranches;
+				}
+
+				if (changed) {
+					this.container.telemetry.sendEvent('timeline/config/changed', {
+						...this.getTelemetryContext(),
+						period: config.period,
+						showAllBranches: config.showAllBranches,
+					});
+
+					this.updateState(true);
+				}
 
 				break;
 			}
@@ -437,9 +487,18 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 	private async getState(context: Context): Promise<State> {
 		const dateFormat = configuration.get('defaultDateFormat') ?? 'MMMM Do, YYYY h:mma';
 		const shortDateFormat = configuration.get('defaultDateShortFormat') ?? 'short';
-		const period = context.period ?? defaultPeriod;
 
 		const uri = context.uri;
+		const repo = uri != null ? this.container.git.getRepository(uri) : undefined;
+		const ref = getReference(await repo?.git.branches().getBranch());
+
+		const config = {
+			...context.config,
+			abbreviatedShaLength: this.container.CommitShaFormatting.length,
+			dateFormat: dateFormat,
+			shortDateFormat: shortDateFormat,
+		};
+
 		const gitUri = uri != null ? await GitUri.fromUri(uri) : undefined;
 		const itemType = context.itemType ?? 'file';
 
@@ -453,10 +512,18 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 			path = gitUri?.relativePath ?? '';
 		}
 
+		const repository: State['repository'] =
+			repo != null
+				? {
+						id: repo.id,
+						uri: repo.uri.toString(),
+						ref: ref,
+				  }
+				: undefined;
+
 		const item: State['item'] = {
 			type: itemType,
 			path: path,
-			sha: gitUri?.shortSha || undefined,
 		};
 
 		if (this.host.isHost('editor')) {
@@ -465,49 +532,44 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 			this.host.description = title || proBadge;
 		}
 
-		const access = await this.container.git.access(PlusFeatures.Timeline, gitUri?.repoPath);
+		const access = await this.container.git.access(PlusFeatures.Timeline, repo?.uri);
 		if (access.allowed === false) {
 			return {
 				...this.host.baseWebviewState,
 				dataset: Promise.resolve(generateRandomTimelineDataset()),
-				period: period,
+				config: config,
 				uri: context.uri?.toString(),
-				item: {
-					type: 'file',
-					path: 'src/app/index.ts',
-					sha: undefined,
-				},
-				abbreviatedShaLength: this.container.CommitShaFormatting.length,
-				dateFormat: dateFormat,
-				shortDateFormat: shortDateFormat,
+				item: { type: 'file', path: 'src/app/index.ts' },
+				repository: repository,
 				access: access,
 			};
 		}
 
 		return {
 			...this.host.baseWebviewState,
-			dataset:
-				context.uri != null && gitUri?.repoPath != null ? this.getDataset(gitUri, itemType, period) : undefined,
-			period: period,
+			dataset: uri != null && repo != null ? this.getDataset(uri, repo, itemType, context.config) : undefined,
+			config: config,
 			uri: context.uri?.toString(),
 			item: item,
-			abbreviatedShaLength: this.container.CommitShaFormatting.length,
-			dateFormat: dateFormat,
-			shortDateFormat: shortDateFormat,
+			repository: repository,
 			access: access,
 		};
 	}
 
-	private async getDataset(gitUri: GitUri, itemType: Context['itemType'], period: TimelinePeriod): Promise<Commit[]> {
-		const repoPath = gitUri.repoPath!;
-
+	private async getDataset(
+		uri: Uri,
+		repo: Repository,
+		itemType: Context['itemType'],
+		config: Context['config'],
+	): Promise<Commit[]> {
 		const [currentUserResult, logResult, statusFilesResult] = await Promise.allSettled([
-			this.container.git.config(repoPath).getCurrentUser(),
-			this.container.git.commits(repoPath).getLogForFile(gitUri.fsPath, gitUri.sha, {
+			repo.git.config().getCurrentUser(),
+			repo.git.commits().getLogForFile(uri.fsPath, config.ref?.ref, {
+				all: config.showAllBranches,
 				limit: 0,
-				since: getPeriodDate(period)?.toISOString(),
+				since: getPeriodDate(config.period)?.toISOString(),
 			}),
-			this.container.git.status(repoPath).getStatusForPath?.(gitUri),
+			repo.git.status().getStatusForPath?.(uri),
 		]);
 
 		const log = getSettledValue(logResult);
@@ -526,8 +588,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		if (queryRequiredCommits.length !== 0) {
 			const limit = configuration.get('visualHistory.queryLimit') ?? 20;
 
-			const repository = this.container.git.getRepository(gitUri);
-			const name = repository?.provider.name;
+			const name = repo.provider.name;
 
 			if (queryRequiredCommits.length > limit) {
 				void window.showWarningMessage(

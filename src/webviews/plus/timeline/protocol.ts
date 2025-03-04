@@ -1,23 +1,35 @@
 import type { FeatureAccess } from '../../../features';
+import type { GitReference } from '../../../git/models/reference';
 import type { IpcScope, WebviewState } from '../../protocol';
-import { IpcCommand, IpcNotification } from '../../protocol';
+import { IpcCommand, IpcNotification, IpcRequest } from '../../protocol';
 
 export const scope: IpcScope = 'timeline';
 
 export interface State extends WebviewState {
 	dataset?: Promise<Commit[]>;
-	period: TimelinePeriod;
+	config: {
+		period: TimelinePeriod;
+		ref: GitReference | undefined;
+		showAllBranches: boolean;
+
+		abbreviatedShaLength: number;
+		dateFormat: string;
+		shortDateFormat: string;
+	};
 
 	uri?: string;
 	item: {
 		type: 'folder' | 'file';
 		path: string;
-		sha: string | undefined;
 	};
+	repository:
+		| {
+				id: string;
+				uri: string;
+				ref: GitReference | undefined;
+		  }
+		| undefined;
 
-	abbreviatedShaLength: number;
-	dateFormat: string;
-	shortDateFormat: string;
 	access: FeatureAccess;
 }
 
@@ -39,16 +51,20 @@ export type TimelinePeriod = `${number}|${'D' | 'M' | 'Y'}` | 'all';
 
 // COMMANDS
 
+export type DidChooseRefParams = { ref: GitReference | undefined } | undefined;
+export const ChooseRefRequest = new IpcRequest<void, DidChooseRefParams>(scope, 'ref/choose');
+
 export interface SelectDataPointParams {
 	id: string | undefined;
 	shift: boolean;
 }
 export const SelectDataPointCommand = new IpcCommand<SelectDataPointParams>(scope, 'point/open');
 
-export interface UpdatePeriodParams {
-	period: TimelinePeriod;
+export interface UpdateConfigParams {
+	period?: TimelinePeriod;
+	showAllBranches?: boolean;
 }
-export const UpdatePeriodCommand = new IpcCommand<UpdatePeriodParams>(scope, 'period/update');
+export const UpdateConfigCommand = new IpcCommand<UpdateConfigParams>(scope, 'config/update');
 
 // NOTIFICATIONS
 

@@ -117,24 +117,35 @@ export const timelineStyles = css`
 		overflow: hidden;
 	}
 
-	.details__title {
+	.details .details__title {
 		flex: 0 1 auto;
 	}
 
-	.details__description {
-		flex: 0 1000000000 auto;
-		opacity: 0.7;
-		font-size: 1.1rem;
+	.details .details__description {
+		flex: 0 10000 auto;
+		color: var(--color-foreground--75);
+		font-size: 1.2rem;
 	}
 
-	.details__sha {
-		flex: 0 100000 auto;
-		opacity: 0.7;
-		font-size: 1.1rem;
+	.details .details__ref {
+		flex: 0 100000000 auto;
+		color: var(--color-foreground--75);
+		font-size: 1.2rem;
+		margin-left: auto;
 	}
 
-	.details__sha .sha {
+	.details .details__ref .ref {
 		margin-left: 0.25rem;
+	}
+
+	.details .details__timeframe {
+		flex: 0 10000000000000 auto;
+		color: var(--color-foreground--75);
+		margin-right: 0.6rem;
+		user-select: none;
+		white-space: nowrap;
+		font-size: 1.2rem;
+		margin-left: auto;
 	}
 
 	.toolbox {
@@ -155,13 +166,13 @@ export const timelineStyles = css`
 	.select-container {
 		display: flex;
 		align-items: center;
-		justify-content: flex-end;
+		justify-content: space-between;
 		flex: 100% 0 1;
 		position: relative;
 	}
 
 	.select-container label {
-		margin: 0 1em 0 0.5rem;
+		margin: 0 1rem 0 0;
 		font-size: var(--font-size);
 		user-select: none;
 	}
@@ -215,5 +226,34 @@ export const timelineStyles = css`
 		vertical-align: super;
 		margin-left: 0.4rem;
 		margin-right: 0.4rem;
+	}
+
+	label {
+		min-width: fit-content;
+	}
+
+	label[disabled] {
+		opacity: 0.5;
+	}
+
+	.config__content {
+		display: flex;
+		flex-direction: column;
+		gap: 0.8rem;
+		max-width: 30rem;
+		min-width: 20rem;
+	}
+
+	.config__content menu-label {
+		padding: 0;
+		margin-bottom: -0.8rem;
+	}
+
+	.config__content section {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
 	}
 `;

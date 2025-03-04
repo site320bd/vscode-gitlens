@@ -1,22 +1,29 @@
 import './timeline.scss';
 import { html, LitElement, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
-import { setAbbreviatedShaLength, shortenRevision } from '../../../../git/utils/revision.utils';
+import { setAbbreviatedShaLength } from '../../../../git/utils/revision.utils';
 import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
 import type { Deferrable } from '../../../../system/function/debounce';
 import { debounce } from '../../../../system/function/debounce';
 import type { State } from '../../../plus/timeline/protocol';
-import { SelectDataPointCommand, UpdatePeriodCommand } from '../../../plus/timeline/protocol';
+import { ChooseRefRequest, SelectDataPointCommand, UpdateConfigCommand } from '../../../plus/timeline/protocol';
 import { GlApp } from '../../shared/app';
+import type { Checkbox } from '../../shared/components/checkbox';
+import type { GlRefButton } from '../../shared/components/ref-button';
 import type { HostIpc } from '../../shared/ipc';
 import type { CommitEventDetail, GlTimelineChart } from './components/chart';
 import { TimelineStateProvider } from './stateProvider';
 import { timelineBaseStyles, timelineStyles } from './timeline.css';
 import './components/chart';
-import '../../shared/components/feature-gate';
-import '../../shared/components/feature-badge';
+import '../../shared/components/button';
+import '../../shared/components/checkbox';
 import '../../shared/components/code-icon';
+import '../../shared/components/feature-badge';
+import '../../shared/components/feature-gate';
+import '../../shared/components/menu/menu-label';
+import '../../shared/components/ref-button';
 import '../../shared/components/progress';
+import '../../shared/components/overlays/popover';
 
 @customElement('gl-timeline-app')
 export class GlTimelineApp extends GlApp<State> {
@@ -34,13 +41,13 @@ export class GlTimelineApp extends GlApp<State> {
 		return new TimelineStateProvider(this, state, ipc);
 	}
 	protected override onPersistState(state: State): void {
-		this._ipc.setPersistedState({ period: state.period, uri: state.uri });
+		this._ipc.setPersistedState({ config: state.config, uri: state.uri });
 	}
 
 	override connectedCallback(): void {
 		super.connectedCallback();
 
-		setAbbreviatedShaLength(this.state.abbreviatedShaLength);
+		setAbbreviatedShaLength(this.state.config.abbreviatedShaLength);
 	}
 
 	get allowed(): boolean | 'mixed' {
@@ -70,16 +77,16 @@ export class GlTimelineApp extends GlApp<State> {
 	@state()
 	private _loading = false;
 
-	get period(): State['period'] {
-		return this.state.period;
+	get config(): State['config'] {
+		return this.state.config;
+	}
+
+	get repository(): State['repository'] {
+		return this.state.repository;
 	}
 
 	get subscription(): State['access']['subscription']['current'] | undefined {
 		return this.state.access?.subscription?.current;
-	}
-
-	get sha(): string | undefined {
-		return shortenRevision(this.state.item.sha);
 	}
 
 	get uri(): string | undefined {
@@ -103,34 +110,17 @@ export class GlTimelineApp extends GlApp<State> {
 							>&nbsp;&nbsp;${this.header.title}</span
 						>
 						<span class="details__description">${this.header.description}</span>
-						<span class="details__sha">
-							${this.sha
-								? html`<code-icon icon="git-commit" size="16"></code-icon
-										><span class="sha">${this.sha}</span>`
-								: nothing}
-						</span>
+						<span class="details__ref"
+							>${this.config.showAllBranches
+								? 'All Branches'
+								: html`<gl-ref-name
+										.ref=${this.config.ref ?? this.repository?.ref}
+								  ></gl-ref-name>`}</span
+						>
+						${this.renderTimeframe()}
 					</span>
 					<span class="toolbox">
-						<span class="select-container">
-							<label for="periods">Timeframe</label>
-							<select
-								class="period"
-								name="periods"
-								position="below"
-								.value=${this.period}
-								@change=${this.onPeriodChanged}
-							>
-								<option value="7|D" ?selected=${this.period === '7|D'}>1 week</option>
-								<option value="1|M" ?selected=${this.period === '1|M'}>1 month</option>
-								<option value="3|M" ?selected=${this.period === '3|M'}>3 months</option>
-								<option value="6|M" ?selected=${this.period === '6|M'}>6 months</option>
-								<option value="9|M" ?selected=${this.period === '9|M'}>9 months</option>
-								<option value="1|Y" ?selected=${this.period === '1|Y'}>1 year</option>
-								<option value="2|Y" ?selected=${this.period === '2|Y'}>2 years</option>
-								<option value="4|Y" ?selected=${this.period === '4|Y'}>4 years</option>
-								<option value="all" ?selected=${this.period === 'all'}>Full history</option>
-							</select>
-						</span>
+						${this.renderConfigPopover()}
 						${this.placement === 'view'
 							? html`<gl-button
 									appearance="toolbar"
@@ -166,8 +156,8 @@ export class GlTimelineApp extends GlApp<State> {
 		return html`<gl-timeline-chart
 			id="chart"
 			placement="${this.placement}"
-			dateFormat="${this.state.dateFormat}"
-			shortDateFormat="${this.state.shortDateFormat}"
+			dateFormat="${this.state.config.dateFormat}"
+			shortDateFormat="${this.state.config.shortDateFormat}"
 			.dataPromise=${this.state.dataset}
 			@gl-commit-select=${this.onChartCommitSelected}
 			@gl-loading=${(e: CustomEvent<Promise<void>>) => {
@@ -177,6 +167,94 @@ export class GlTimelineApp extends GlApp<State> {
 		>
 		</gl-timeline-chart>`;
 	}
+
+	private renderConfigPopover() {
+		const { period, showAllBranches } = this.config;
+
+		return html`<gl-popover class="config" placement="bottom" trigger="hover focus click" hoist>
+			<gl-button slot="anchor" appearance="toolbar">
+				<code-icon icon="settings"></code-icon>
+			</gl-button>
+			<div slot="content" class="config__content">
+				<menu-label>View Options</menu-label>
+				<section>
+					<span class="select-container">
+						<label for="periods">Timeframe</label>
+						<select
+							class="period"
+							name="periods"
+							position="below"
+							.value=${period}
+							@change=${this.onPeriodChanged}
+						>
+							<option value="7|D" ?selected=${period === '7|D'}>1 week</option>
+							<option value="1|M" ?selected=${period === '1|M'}>1 month</option>
+							<option value="3|M" ?selected=${period === '3|M'}>3 months</option>
+							<option value="6|M" ?selected=${period === '6|M'}>6 months</option>
+							<option value="9|M" ?selected=${period === '9|M'}>9 months</option>
+							<option value="1|Y" ?selected=${period === '1|Y'}>1 year</option>
+							<option value="2|Y" ?selected=${period === '2|Y'}>2 years</option>
+							<option value="4|Y" ?selected=${period === '4|Y'}>4 years</option>
+							<option value="all" ?selected=${period === 'all'}>Full history</option>
+						</select>
+					</span>
+				</section>
+				<section>
+					<label for="base" ?disabled=${showAllBranches}>Base Ref&nbsp;&nbsp;</label>
+					<gl-ref-button
+						name="base"
+						?disabled=${showAllBranches}
+						tooltip="Change Base Reference"
+						.ref=${this.config.ref ?? this.repository?.ref}
+						@click=${this.onChooseRef}
+					></gl-ref-button>
+				</section>
+				<section>
+					<gl-checkbox
+						value="all"
+						.checked=${showAllBranches}
+						@gl-change-value=${(e: CustomEvent<void>) => {
+							this._ipc.sendCommand(UpdateConfigCommand, {
+								showAllBranches: (e.target as Checkbox).checked,
+							});
+						}}
+						>View All Branches</gl-checkbox
+					>
+				</section>
+			</div>
+		</gl-popover>`;
+	}
+
+	private renderTimeframe() {
+		switch (this.config.period) {
+			case '7|D':
+				return html`<span class="details__timeframe">Up to 1wk ago</span>`;
+			case '1|M':
+				return html`<span class="details__timeframe">Up to 1mo ago</span>`;
+			case '3|M':
+				return html`<span class="details__timeframe">Up to 3mo ago</span>`;
+			case '6|M':
+				return html`<span class="details__timeframe">Up to 6mo ago</span>`;
+			case '9|M':
+				return html`<span class="details__timeframe">Up to 9mo ago</span>`;
+			case '1|Y':
+				return html`<span class="details__timeframe">Up to 1yr ago</span>`;
+			case '2|Y':
+				return html`<span class="details__timeframe">Up to 2yr ago</span>`;
+			case '4|Y':
+				return html`<span class="details__timeframe">Up to 4yr ago</span>`;
+			case 'all':
+				return html`<span class="details__timeframe">All time</span>`;
+			default:
+				return nothing;
+		}
+	}
+
+	private onChooseRef = (e: Event) => {
+		if ((e.target as GlRefButton).disabled) return;
+
+		void this._ipc.sendRequest(ChooseRefRequest, undefined);
+	};
 
 	private onChartCommitSelected(e: CustomEvent<CommitEventDetail>) {
 		if (e.detail.id == null) return;
@@ -191,7 +269,7 @@ export class GlTimelineApp extends GlApp<State> {
 
 		// this.log(`onPeriodChanged(): name=${element.name}, value=${value}`);
 
-		this._ipc.sendCommand(UpdatePeriodCommand, { period: value });
+		this._ipc.sendCommand(UpdateConfigCommand, { period: value });
 	}
 
 	private _fireSelectDataPointDebounced: Deferrable<(e: CommitEventDetail) => void> | undefined;
@@ -205,7 +283,7 @@ export class GlTimelineApp extends GlApp<State> {
 	}
 }
 
-function assertPeriod(period: string): asserts period is State['period'] {
+function assertPeriod(period: string): asserts period is State['config']['period'] {
 	if (period === 'all') return;
 
 	const [value, unit] = period.split('|');
