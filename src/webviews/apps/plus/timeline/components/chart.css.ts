@@ -443,6 +443,10 @@ export const timelineChartStyles = css`
 		white-space: pre-line;
 	}
 
+	:host-context(:host[placement='editor']) .bb-axis-y .tick text {
+		fill: var(--color-foreground--85);
+	}
+
 	:host-context(:host[placement='view']) .bb-axis-y .tick text {
 		transform: translate(0, 0.4rem);
 		font-family: codicon;

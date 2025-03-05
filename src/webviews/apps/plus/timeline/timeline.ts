@@ -1,12 +1,18 @@
 import './timeline.scss';
 import { html, LitElement, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
+import type { GitReference } from '../../../../git/models/reference';
 import { setAbbreviatedShaLength } from '../../../../git/utils/revision.utils';
 import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
 import type { Deferrable } from '../../../../system/function/debounce';
 import { debounce } from '../../../../system/function/debounce';
 import type { State } from '../../../plus/timeline/protocol';
-import { ChooseRefRequest, SelectDataPointCommand, UpdateConfigCommand } from '../../../plus/timeline/protocol';
+import {
+	ChooseRefRequest,
+	SelectDataPointCommand,
+	UpdateConfigCommand,
+	UpdateUriCommand,
+} from '../../../plus/timeline/protocol';
 import { GlApp } from '../../shared/app';
 import type { Checkbox } from '../../shared/components/checkbox';
 import type { GlRefButton } from '../../shared/components/ref-button';
@@ -15,6 +21,7 @@ import type { CommitEventDetail, GlTimelineChart } from './components/chart';
 import { TimelineStateProvider } from './stateProvider';
 import { timelineBaseStyles, timelineStyles } from './timeline.css';
 import './components/chart';
+import '../../shared/components/breadcrumbs';
 import '../../shared/components/button';
 import '../../shared/components/checkbox';
 import '../../shared/components/code-icon';
@@ -65,22 +72,6 @@ export class GlTimelineApp extends GlApp<State> {
 		return this.state.config;
 	}
 
-	get header(): { title: string; description: string } {
-		let title = this.state.item.path;
-		let description;
-
-		if (title != null) {
-			const index = title.lastIndexOf('/');
-			if (index >= 0) {
-				const name = title.substring(index + 1);
-				description = title.substring(0, index);
-				title = name;
-			}
-		}
-
-		return { title: title ?? '', description: description ?? '' };
-	}
-
 	get itemType() {
 		return this.state.item.type;
 	}
@@ -112,19 +103,15 @@ export class GlTimelineApp extends GlApp<State> {
 			<div class="container">
 				<progress-indicator ?active=${this._loading}></progress-indicator>
 				<header class="header" ?hidden=${!this.uri}>
-					<span class="details">
-						<span class="details__title"
-							><code-icon icon="${this.itemType === 'folder' ? 'folder' : 'file'}"></code-icon
-							>&nbsp;&nbsp;${this.header.title}</span
-						>
-						<span class="details__description">${this.header.description}</span>
+					<span class="details"
+						>${this.renderBreadcrumbs()}
 						<span class="details__ref"
 							>${this.config.showAllBranches
 								? 'All Branches'
-								: html`<gl-ref-name .ref=${this.base}></gl-ref-name>`}</span
+								: html`<gl-ref-name icon .ref=${this.base}></gl-ref-name>`}</span
 						>
-						${this.renderTimeframe()}
-					</span>
+						${this.renderTimeframe()}</span
+					>
 					<span class="toolbox">
 						${this.renderConfigPopover()}
 						${this.placement === 'view'
@@ -150,6 +137,80 @@ export class GlTimelineApp extends GlApp<State> {
 				<main class="timeline">${this.renderChart()}</main>
 			</div>
 		`;
+	}
+
+	private renderBreadcrumbs() {
+		const repo = this.state.repository;
+
+		return html`<gl-breadcrumbs>
+			${repo != null
+				? html`<gl-breadcrumb-item type="repo" icon="repo" tooltip="${repo.name}" collapsibleState="collapsed"
+						>${repo.name}</gl-breadcrumb-item
+				  >`
+				: nothing}
+			<gl-breadcrumb-item
+				type="ref"
+				icon="${getRefIcon(this.base)}"
+				tooltip="${this.base?.name || 'HEAD'}"
+				collapsibleState="collapsed"
+				><gl-ref-button .ref=${this.base} @click=${this.onChooseRef}></gl-ref-button
+			></gl-breadcrumb-item>
+			${this.renderBreadcrumbPathItems()}</gl-breadcrumbs
+		>`;
+	}
+
+	private renderBreadcrumbPathItems() {
+		const path = this.state.item.path || '';
+		if (!path) return nothing;
+
+		const breadcrumbs = [];
+
+		const parts = path.split('/');
+		const basePart = parts.pop() || '';
+		const valuePrefix = '../'.repeat(parts.length + (this.itemType === 'folder' ? 2 : 1));
+		const folders = parts.length;
+
+		// Add folder parts if any
+		if (folders) {
+			const rootPart = parts.shift()!;
+			let fullPath = rootPart;
+
+			const folderItem = html`
+				<gl-breadcrumb-item type="folder" icon="folder" tooltip="${rootPart}" collapsibleState="expanded">
+					<span value="${valuePrefix}${rootPart}" @click=${this.onUpdateUri}>${rootPart}</span>
+					${parts.length
+						? html`
+								<span slot="children">
+									${parts.map(part => {
+										fullPath = `${fullPath}/${part}`;
+										return html`<gl-breadcrumb-item-child tooltip="${fullPath}"
+											><span value="${valuePrefix}${fullPath}" @click=${this.onUpdateUri}
+												>${part}</span
+											></gl-breadcrumb-item-child
+										>`;
+									})}
+								</span>
+						  `
+						: nothing}
+				</gl-breadcrumb-item>
+			`;
+
+			breadcrumbs.push(folderItem);
+		}
+
+		// Add base item
+		breadcrumbs.push(html`
+			<gl-breadcrumb-item
+				type="${this.itemType === 'folder' ? 'folder' : 'file'}"
+				icon="${this.itemType === 'folder' ? (folders ? undefined : 'folder') : 'file'}"
+				tooltip="${path}"
+				collapsibleState="none"
+			>
+				<span value="${valuePrefix}${path}" @click=${this.onUpdateUri}>${basePart}</span>
+			</gl-breadcrumb-item>
+		`);
+
+		return breadcrumbs;
 	}
 
 	private renderChart() {
@@ -191,6 +252,7 @@ export class GlTimelineApp extends GlApp<State> {
 					<gl-ref-button
 						name="base"
 						tooltip="Change Base Reference"
+						icon
 						.ref=${this.base}
 						@click=${this.onChooseRef}
 					></gl-ref-button>
@@ -280,6 +342,14 @@ export class GlTimelineApp extends GlApp<State> {
 		void this._ipc.sendRequest(ChooseRefRequest, undefined);
 	};
 
+	private onUpdateUri = (e: Event) => {
+		const element = e.target as HTMLSpanElement;
+		const value = element.getAttribute('value');
+		if (value == null) return;
+
+		this._ipc.sendCommand(UpdateUriCommand, { path: value });
+	};
+
 	private onChartCommitSelected(e: CustomEvent<CommitEventDetail>) {
 		if (e.detail.id == null) return;
 
@@ -325,5 +395,16 @@ function assertPeriod(period: string): asserts period is State['config']['period
 function assertSliceBy(sliceBy: string): asserts sliceBy is State['config']['sliceBy'] {
 	if (sliceBy !== 'author' && sliceBy !== 'branch') {
 		throw new Error(`Invalid slice by: ${sliceBy}`);
+	}
+}
+
+function getRefIcon(ref: GitReference | undefined): string {
+	switch (ref?.refType) {
+		case 'branch':
+			return 'git-branch';
+		case 'tag':
+			return 'tag';
+		default:
+			return 'git-commit';
 	}
 }

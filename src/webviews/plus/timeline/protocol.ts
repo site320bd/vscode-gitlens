@@ -27,6 +27,7 @@ export interface State extends WebviewState {
 		| {
 				id: string;
 				uri: string;
+				name: string;
 				ref: GitReference | undefined;
 		  }
 		| undefined;
@@ -70,6 +71,12 @@ export interface UpdateConfigParams {
 	sliceBy?: TimelineSliceBy;
 }
 export const UpdateConfigCommand = new IpcCommand<UpdateConfigParams>(scope, 'config/update');
+
+export interface UpdateUriParams {
+	uri?: string;
+	path?: string;
+}
+export const UpdateUriCommand = new IpcCommand<UpdateUriParams>(scope, 'uri/update');
 
 // NOTIFICATIONS
 

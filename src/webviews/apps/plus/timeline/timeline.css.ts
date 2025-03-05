@@ -89,7 +89,7 @@ export const timelineStyles = css`
 		flex: none;
 		display: grid;
 		grid-template-columns: 1fr min-content;
-		align-items: baseline;
+		align-items: center;
 		grid-template-areas: 'details toolbox';
 		margin: 0.5rem 1rem;
 	}
@@ -103,13 +103,14 @@ export const timelineStyles = css`
 		grid-area: details;
 		display: flex;
 		gap: 1rem;
-		align-items: baseline;
+		align-items: center;
 		font-size: var(--font-size);
 		min-width: 0;
 		margin-right: 1rem;
 	}
 
-	.details span {
+	.details .details__ref,
+	.details .details__timeframe {
 		min-width: 0;
 		margin: 0;
 		text-overflow: ellipsis;
@@ -117,14 +118,10 @@ export const timelineStyles = css`
 		overflow: hidden;
 	}
 
-	.details .details__title {
-		flex: 0 1 auto;
-	}
-
-	.details .details__description {
-		flex: 0 10000 auto;
-		color: var(--color-foreground--75);
-		font-size: 1.2rem;
+	.details gl-breadcrumb {
+		flex: 1;
+		min-width: 0;
+		padding: 0.1rem 0;
 	}
 
 	.details .details__ref {
@@ -139,7 +136,7 @@ export const timelineStyles = css`
 	}
 
 	.details .details__timeframe {
-		flex: 0 10000000000000 auto;
+		flex: 0 0 auto;
 		color: var(--color-foreground--75);
 		margin-right: 0.6rem;
 		user-select: none;

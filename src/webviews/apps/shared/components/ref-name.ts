@@ -28,9 +28,12 @@ export class GlRefName extends LitElement {
 		}
 
 		.label {
-			font-weight: bold;
+			font-weight: var(--font-weight, bold);
 		}
 	`;
+
+	@property({ type: Boolean, reflect: true })
+	icon = false;
 
 	@property({ type: Object })
 	ref?: GitReference;
@@ -62,8 +65,10 @@ export class GlRefName extends LitElement {
 		}
 
 		return html`<span class="${className}"
-			><code-icon class="icon" icon="${icon}" size="${this.size}"></code-icon
-			><span class="label">${this.ref.name}</span></span
+			>${this.icon ? html`<code-icon class="icon" icon="${icon}" size="${this.size}"></code-icon>` : nothing}<span
+				class="label"
+				>${this.ref.name}</span
+			></span
 		>`;
 	}
 }
@@ -74,6 +79,11 @@ declare global {
 	}
 }
 
-export function renderRefName(ref: GitReference | undefined, worktree?: boolean): TemplateResult {
-	return html`<gl-ref-name .ref=${ref} .size=${12} ?worktree=${worktree ?? false}></gl-ref-name>`;
+export function renderRefName(ref: GitReference | undefined, icon?: boolean, worktree?: boolean): TemplateResult {
+	return html`<gl-ref-name
+		?icon=${icon ?? true}
+		.ref=${ref}
+		.size=${12}
+		?worktree=${worktree ?? false}
+	></gl-ref-name>`;
 }

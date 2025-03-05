@@ -14,6 +14,8 @@ export class GlRefButton extends LitElement {
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
+
+			--font-weight: normal;
 		}
 
 		gl-button {
@@ -32,6 +34,10 @@ export class GlRefButton extends LitElement {
 			text-underline-offset: 2px;
 		}
 
+		gl-ref-name:not([icon]) {
+			padding-left: 0.4rem;
+		}
+
 		.chevron {
 			align-self: center;
 		}
@@ -39,6 +45,9 @@ export class GlRefButton extends LitElement {
 
 	@property({ type: Boolean, reflect: true })
 	disabled = false;
+
+	@property({ type: Boolean, reflect: true })
+	icon = false;
 
 	@property({ type: Object })
 	ref?: GitReference;
@@ -62,6 +71,7 @@ export class GlRefButton extends LitElement {
 				>${this.ref == null
 					? html`<slot name="empty">&lt;missing&gt;</slot>`
 					: html`<gl-ref-name
+							?icon=${this.icon}
 							.ref=${this.ref}
 							.size=${this.size}
 							?worktree=${this.worktree}
@@ -76,6 +86,11 @@ declare global {
 	}
 }
 
-export function renderRefButton(ref: GitReference | undefined, worktree?: boolean): TemplateResult {
-	return html`<gl-ref-button .ref=${ref} .size=${12} ?worktree=${worktree ?? false}></gl-ref-button>`;
+export function renderRefButton(ref: GitReference | undefined, icon?: boolean, worktree?: boolean): TemplateResult {
+	return html`<gl-ref-button
+		?icon=${icon ?? true}
+		.ref=${ref}
+		.size=${12}
+		?worktree=${worktree ?? false}
+	></gl-ref-button>`;
 }

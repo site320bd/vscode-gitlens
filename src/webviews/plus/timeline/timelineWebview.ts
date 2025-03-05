@@ -49,7 +49,13 @@ import type { WebviewHost, WebviewProvider, WebviewShowingArgs } from '../../web
 import type { WebviewShowOptions } from '../../webviewsController';
 import { isSerializedState } from '../../webviewsController';
 import type { Commit, State, TimelineItemType, TimelinePeriod, TimelineSliceBy } from './protocol';
-import { ChooseRefRequest, DidChangeNotification, SelectDataPointCommand, UpdateConfigCommand } from './protocol';
+import {
+	ChooseRefRequest,
+	DidChangeNotification,
+	SelectDataPointCommand,
+	UpdateConfigCommand,
+	UpdateUriCommand,
+} from './protocol';
 import type { TimelineWebviewShowingArgs } from './registration';
 
 interface Context {
@@ -389,6 +395,20 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 
 				break;
 			}
+			case UpdateUriCommand.is(e): {
+				if (e.params.uri == null && e.params.path == null) return;
+
+				if (e.params.path != null) {
+					const uri = Uri.joinPath(this._context.uri!, e.params.path);
+					void this.updateUri(uri);
+					return;
+				}
+
+				if (e.params.uri != null) {
+					void this.updateUri(Uri.parse(e.params.uri));
+				}
+				break;
+			}
 		}
 	}
 
@@ -520,6 +540,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 				? {
 						id: repo.id,
 						uri: repo.uri.toString(),
+						name: repo.name,
 						ref: ref,
 				  }
 				: undefined;
