@@ -10,6 +10,8 @@ import './ref-name';
 export class GlRefButton extends LitElement {
 	static override styles = css`
 		:host {
+			display: inline-block;
+			vertical-align: middle;
 			max-width: 100%;
 			overflow: hidden;
 			text-overflow: ellipsis;

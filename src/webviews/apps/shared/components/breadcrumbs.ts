@@ -72,6 +72,7 @@ export class GlBreadcrumbItem extends LitElement {
 			display: inline-flex;
 			align-items: center;
 			gap: 0.4rem;
+			vertical-align: middle;
 		}
 
 		.breadcrumb-icon {
@@ -84,6 +85,7 @@ export class GlBreadcrumbItem extends LitElement {
 		}
 
 		.breadcrumb-label {
+			display: inline-block;
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
@@ -165,7 +167,7 @@ export class GlBreadcrumbItem extends LitElement {
 									@click=${collapsible ? this.onToggleCollapse : undefined}
 							  ></code-icon>`
 							: nothing}
-						<span class="breadcrumb-label"><slot></slot></span>
+						<slot class="breadcrumb-label"></slot>
 					</span>
 				</gl-tooltip>
 				<slot name="children"></slot>
@@ -187,6 +189,10 @@ export class GlBreadcrumbItem extends LitElement {
 @customElement('gl-breadcrumb-item-child')
 export class GlBreadcrumbItemChild extends LitElement {
 	static override styles = css`
+		:host {
+			display: inline-block;
+			vertical-align: middle;
+		}
 		:host::before {
 			content: '\\eab6'; /* chevron-right codicon */
 			opacity: 0.6;
